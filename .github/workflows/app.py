@@ -1,3 +1,4 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import uuid
@@ -5,11 +6,13 @@ import urllib.parse
 from datetime import datetime
 
 # Import des fonctions et constantes depuis utils.py
+# (Ce fichier est importé soit localement, soit via le package GitHub)
 import utils
 
 # --- CONFIGURATION ET STYLE ---
 st.set_page_config(page_title="Formulaire Dynamique - Firestore", layout="centered")
 
+# CSS pour le thème sombre et les couleurs spécifiques
 st.markdown("""
 <style>
     .stApp { background-color: #121212; color: #e0e0e0; }
@@ -29,6 +32,7 @@ st.markdown("""
 
 # --- GESTION DE L'ÉTAT ---
 def init_session_state():
+    """Initialise l'état de session avec les valeurs par défaut."""
     defaults = {
         'step': 'PROJECT_LOAD',
         'project_data': None,
@@ -41,7 +45,9 @@ def init_session_state():
         'id_rendering_ident': None,
         'form_start_time': None,
         'submission_id': None,
-        'show_comment_on_error': False
+        'show_comment_on_error': False,
+        'df_struct': None,
+        'df_site': None
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -68,6 +74,7 @@ if st.session_state['step'] == 'PROJECT_LOAD':
         else:
             st.error("Impossible de charger les données. Vérifiez votre connexion et les secrets Firebase.")
             if st.button("Réessayer le chargement"):
+                # Clear le cache pour forcer le re-téléchargement des données
                 utils.load_form_structure_from_firestore.clear() 
                 utils.load_site_data_from_firestore.clear() 
                 st.session_state['step'] = 'PROJECT_LOAD'
@@ -144,6 +151,7 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
         project_details = st.session_state['project_data']
         st.markdown(":orange-badge[**Détails du Projet sélectionné :**]")
         
+        # Affichage des détails du projet (récupéré des données 'Sites')
         with st.container(border=True):
             st.markdown("**Informations générales**")
             cols1 = st.columns([1, 1, 1]) 
@@ -196,7 +204,8 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
         df = st.session_state['df_struct']
         ID_SECTION_NAME = df['section'].iloc[0]
         ID_SECTION_CLEAN = str(ID_SECTION_NAME).strip().lower()
-        SECTIONS_TO_EXCLUDE_CLEAN = {ID_SECTION_CLEAN, "phase"}
+        # Exclure la section d'identification et la ligne de question 'phase' si elle existe
+        SECTIONS_TO_EXCLUDE_CLEAN = {ID_SECTION_CLEAN, "phase"} 
         all_sections_raw = df['section'].unique().tolist()
         available_phases = []
         for sec in all_sections_raw:
@@ -235,12 +244,13 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                     visible_count += 1
             
             if visible_count == 0 and not st.session_state.get('show_comment_on_error', False):
-                st.warning("Aucune question visible.")
+                st.warning("Aucune question visible dans cette phase.")
 
             if st.session_state.get('show_comment_on_error', False):
                 st.markdown("---")
                 st.markdown("### ✍️ Justification de l'Écart")
-                comment_row = pd.Series({'id': utils.COMMENT_ID})
+                # Crée une ligne 'fantôme' pour la question de commentaire
+                comment_row = pd.Series({'id': utils.COMMENT_ID, 'type': 'text'}) 
                 utils.render_question(comment_row, st.session_state['current_phase_temp'], current_phase, st.session_state['iteration_id'], 999, st.session_state['project_data']) 
             
             st.markdown("---")
@@ -248,6 +258,7 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
             with c1:
                 if st.button("❌ Annuler"):
                     st.session_state['step'] = 'LOOP_DECISION'
+                    st.session_state['current_phase_temp'] = {}
                     st.session_state['show_comment_on_error'] = False
                     st.rerun()
             with c2:
@@ -257,10 +268,11 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                     if is_valid:
                         new_entry = {"phase_name": current_phase, "answers": st.session_state['current_phase_temp'].copy()}
                         st.session_state['collected_data'].append(new_entry)
-                        st.success("Enregistré !")
+                        st.success("Phase validée et enregistrée !")
                         st.session_state['step'] = 'LOOP_DECISION'
                         st.rerun()
                     else:
+                        # Vérifie si l'erreur est liée au manque de justification pour les photos
                         is_photo_error = any(f"Commentaire (ID {utils.COMMENT_ID})" in e for e in errors)
                         if is_photo_error: st.session_state['show_comment_on_error'] = True
                         html_errors = '<br>'.join([f"- {e}" for e in errors])
@@ -273,13 +285,13 @@ elif st.session_state['step'] == 'FINISHED':
     st.markdown("## 🎉 Formulaire Terminé")
     project_name = st.session_state['project_data'].get('Intitulé', 'Projet Inconnu')
     st.write(f"Projet : **{project_name}**")
-    st.warning('Il est attendu que vous téléchargiez le rapport Word ci-dessous pour le transmettre à votre interlocuteur Yusco', icon="⚠️")
+    st.warning('Il est attendu que vous téléchargiez le rapport Word ci-dessous pour le transmettre à votre interlocuteur.', icon="⚠️")
     
     
     # 1. SAUVEGARDE FIREBASE
     if not st.session_state['data_saved']:
         with st.spinner("Sauvegarde des réponses dans Firestore..."):
-            success, submission_id_returned = utils.save_form_data(
+            success, result_message = utils.save_form_data(
                 st.session_state['collected_data'], 
                 st.session_state['project_data'],
                 st.session_state['submission_id'],
@@ -288,12 +300,13 @@ elif st.session_state['step'] == 'FINISHED':
 
             if success:
                 st.session_state['data_saved'] = True
+                st.session_state['submission_id_final'] = result_message
             else:
-                st.error(f"Erreur lors de la sauvegarde : {submission_id_returned}")
+                st.error(f"Erreur lors de la sauvegarde : {result_message}")
                 if st.button("Réessayer la sauvegarde"):
                     st.rerun()
     else:
-        st.info("Les données sont sauvegardées")
+        st.info(f"Les données sont sauvegardées dans Firestore (ID: {st.session_state.get('submission_id_final', 'N/A')})")
 
     if st.session_state['data_saved']:
         # Préparation des exports
