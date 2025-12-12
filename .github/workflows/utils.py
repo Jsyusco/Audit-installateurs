@@ -517,6 +517,10 @@ def create_word_report(collected_data, df_struct, project_data, start_time):
 # ... (Le reste du code de utils.py reste inchangé) ...
 
 # --- COMPOSANT UI (rendu de la question) ---
+# utils.py - Fonction render_question (complète et corrigée)
+# ... (N'oubliez pas les imports et le reste de votre fichier utils.py) ...
+
+# --- COMPOSANT UI (rendu de la question) ---
 def render_question(row, answers, phase_name, key_suffix, loop_index, project_data):
     """
     Rendu d'une question dans Streamlit. Modifie le dictionnaire 'answers' en place.
@@ -534,7 +538,8 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
         q_options = []
     else:
         q_text = row['question']
-        q_type = str(row['type']).strip().lower()
+        # Ligne cruciale : on nettoie et met en minuscule pour une comparaison robuste
+        q_type = str(row['type']).strip().lower() 
         q_desc = row['Description']
         q_mandatory = str(row['obligatoire']).lower() == 'oui'
         q_options = str(row['options']).split(',') if row['options'] else []
@@ -548,6 +553,9 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
 
     st.markdown(f'<div class="question-card"><div>{label_html}</div>', unsafe_allow_html=True)
     if q_desc: st.markdown(f'<div class="description">⚠️ {q_desc}</div>', unsafe_allow_html=True)
+    
+    # Étape de débogage temporaire : 
+    # st.write(f"DEBUG: Q_ID={q_id}, Q_TYPE='{q_type}'") 
 
     if q_type == 'text':
         default_val = current_val if current_val else ""
@@ -563,26 +571,20 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
         val = st.selectbox("Sélection", clean_opts, index=idx, key=widget_key, label_visibility="collapsed")
     
     # --- LOGIQUE AUTOMATIQUE POUR NUMBER (FORCÉ EN ENTIER) ---
-    elif q_type == 'number':
-        
-        # Le comportement est désormais ENTIER (integer) pour TOUS les 'number'
+    elif q_type == 'number': # Cette condition doit être TRUE
         
         label = "Nombre (Entier)"
         # On s'assure que la valeur par défaut est un entier (0 si invalide)
         try:
-            # Convertit d'abord en float pour gérer les formats 'X.0' ou 'X,X' lors de la récupération
             default_val = int(float(current_val)) if current_val is not None and str(current_val).replace('.', '', 1).isdigit() else 0
         except:
             default_val = 0
             
-        # On force l'entrée à être un entier : 
-        # - step=1 (boutons +1/-1)
-        # - format="%d" (affichage sans décimales)
         val = st.number_input(
             label, 
             value=default_val, 
-            step=1, 
-            format="%d", 
+            step=1,             # <-- LIGNE CRUCIALE : Force le pas de 1
+            format="%d",         # <-- LIGNE CRUCIALE : Force l'affichage entier
             key=widget_key, 
             label_visibility="collapsed"
         )
@@ -610,14 +612,11 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
     
     # Mise à jour des réponses dans le dictionnaire 'answers'
     if val is not None and (not is_dynamic_comment or str(val).strip() != ""): 
-        # Si c'est un 'number', on force toujours le stockage en entier.
         if q_type == 'number':
-             answers[q_id] = int(val) 
+             answers[q_id] = int(val) # <-- LIGNE CRUCIALE : Force le stockage en entier
         else:
             answers[q_id] = val 
     elif current_val is not None and not is_dynamic_comment: 
         answers[q_id] = current_val 
-    elif is_dynamic_comment and (val is None or str(val).strip() == ""):
-        if q_id in answers: del answers[q_id]
     elif is_dynamic_comment and (val is None or str(val).strip() == ""):
         if q_id in answers: del answers[q_id]
