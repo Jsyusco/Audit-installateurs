@@ -43,7 +43,7 @@ SECTION_PHOTO_RULES = {
 COMMENT_ID = 100
 COMMENT_QUESTION = "Veuillez préciser pourquoi le nombre de photo partagé ne correspond pas au minimum attendu"
 
-# --- INITIALISATION FIREBASE (MODIFIÉE) ---
+# --- INITIALISATION FIREBASE ---
 def initialize_firebase():
     """
     Initialise Firebase si ce n'est pas déjà fait. 
@@ -56,7 +56,6 @@ def initialize_firebase():
                 "type": st.secrets["firebase_type"],
                 "project_id": st.secrets["firebase_project_id"],
                 "private_key_id": st.secrets["firebase_private_key_id"],
-                # IMPORTANT : Assurez-vous que la clé privée est correctement gérée
                 "private_key": st.secrets["firebase_private_key"].replace('\\n', '\n'),
                 "client_email": st.secrets["firebase_client_email"],
                 "client_id": st.secrets["firebase_client_id"],
@@ -72,7 +71,7 @@ def initialize_firebase():
             firebase_admin.initialize_app(cred, {'projectId': project_id})
         except Exception as e:
             st.error(f"Erreur de connexion Firebase : {e}")
-            st.stop() # Arrête l'exécution si la connexion échoue
+            st.stop() 
             
     return firestore.client()
 
@@ -161,7 +160,6 @@ def get_expected_photo_count(section_name, project_data):
 def check_condition(row, current_answers, collected_data):
     """Vérifie si une question doit être affichée en fonction des réponses précédentes."""
     try:
-        # Condition on = 1 signifie qu'il y a une condition
         if int(row.get('Condition on', 0)) != 1: return True
     except (ValueError, TypeError): return True
 
@@ -179,7 +177,6 @@ def check_condition(row, current_answers, collected_data):
         user_answer = combined_answers.get(target_id)
         
         if user_answer is not None:
-            # La condition est remplie si la réponse correspond à la valeur attendue
             return str(user_answer).lower() == str(expected_value).lower()
         else:
             return False
@@ -203,7 +200,6 @@ def validate_section(df_questions, section_name, answers, collected_data, projec
     )
     
     if expected_total is not None and expected_total > 0:
-        # Le total attendu est multiplié par le nombre de questions photo visibles (si plusieurs questions sont du type photo)
         expected_total = expected_total_base * photo_question_count
         detail_str = (
             f"{detail_str} | Questions photo visibles: {photo_question_count} "
@@ -262,9 +258,9 @@ def validate_section(df_questions, section_name, answers, collected_data, projec
 
     return len(missing) == 0, missing
 
-# --- SAUVEGARDE ET EXPORTS ---
+# --- SAUVEGARDE ET EXPORTS (inchangées) ---
 def save_form_data(collected_data, project_data, submission_id, start_time):
-    """Sauvegarde les données du formulaire (sans les fichiers) dans Firestore."""
+    # ... code inchangé ...
     try:
         cleaned_data = []
         for phase in collected_data:
@@ -299,12 +295,12 @@ def save_form_data(collected_data, project_data, submission_id, start_time):
         doc_id = f"{doc_id_base}_{datetime.now().strftime('%Y%m%d_%H%M')}_{submission_id[:6]}"
         
         db.collection('FormAnswers').document(doc_id).set(final_document)
-        return True, doc_id # Retourne l'ID du document créé
+        return True, doc_id 
     except Exception as e:
         return False, str(e)
 
 def create_csv_export(collected_data, df_struct, project_name, submission_id, start_time):
-    """Crée l'export CSV des réponses."""
+    # ... code inchangé ...
     rows = []
     start_time_str = start_time.strftime('%Y-%m-%d %H:%M:%S') if isinstance(start_time, datetime) else 'N/A'
     end_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -319,7 +315,6 @@ def create_csv_export(collected_data, df_struct, project_name, submission_id, st
                 q_row = df_struct[df_struct['id'] == int(q_id)]
                 q_text = q_row.iloc[0]['question'] if not q_row.empty else f"Question ID {q_id}"
             
-            # Gestion de l'affichage pour les fichiers/photos dans le CSV
             if isinstance(val, list) and val and hasattr(val[0], 'name'):
                 final_val = f"[Pièces jointes] {len(val)} fichiers: " + ", ".join([f.name for f in val])
             elif hasattr(val, 'name'):
@@ -342,7 +337,7 @@ def create_csv_export(collected_data, df_struct, project_name, submission_id, st
     return df_export.to_csv(index=False, sep=';', encoding='utf-8-sig')
 
 def create_zip_export(collected_data):
-    """Crée l'archive ZIP contenant toutes les photos soumises."""
+    # ... code inchangé ...
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         files_added = 0
@@ -352,7 +347,6 @@ def create_zip_export(collected_data):
                 if isinstance(answer, list) and answer and hasattr(answer[0], 'read'):
                     for idx, file_obj in enumerate(answer):
                         try:
-                            # Lire le contenu du fichier et l'ajouter au zip
                             file_obj.seek(0)
                             file_content = file_obj.read()
                             if file_content:
@@ -360,9 +354,9 @@ def create_zip_export(collected_data):
                                 filename = f"{phase_name_clean}_Q{q_id}_{idx+1}_{original_name}"
                                 zip_file.writestr(filename, file_content)
                                 files_added += 1
-                            file_obj.seek(0) # Remet le curseur au début pour les autres opérations (ex: Word)
+                            file_obj.seek(0)
                         except Exception as e:
-                            pass # Ignorer les erreurs d'un fichier spécifique
+                            pass 
                             
         info_txt = f"Export généré le {datetime.now()}\nNombre de fichiers : {files_added}"
         zip_file.writestr("info.txt", info_txt)
@@ -371,7 +365,7 @@ def create_zip_export(collected_data):
     return zip_buffer
 
 def define_custom_styles(doc):
-    """Définit les styles Word personnalisés pour le rapport."""
+    # ... code inchangé ...
     # Style de titre principal
     try: title_style = doc.styles.add_style('Report Title', WD_STYLE_TYPE.PARAGRAPH)
     except: title_style = doc.styles['Report Title']
@@ -411,7 +405,7 @@ def define_custom_styles(doc):
     doc.styles['Normal'].font.size = Pt(11)
 
 def create_word_report(collected_data, df_struct, project_data, start_time):
-    """Génère le rapport d'audit au format DOCX."""
+    # ... code inchangé ...
     doc = Document()
     define_custom_styles(doc)
     
@@ -482,13 +476,12 @@ def create_word_report(collected_data, df_struct, project_data, start_time):
                              image_data = file_obj.read()
                              if image_data:
                                  image_stream = io.BytesIO(image_data)
-                                 # Ajout de l'image (taille fixe)
                                  doc.add_picture(image_stream, width=Inches(5)) 
                                  caption = doc.add_paragraph(f'Photo {idx+1}: {file_obj.name}', style='Report Text')
                                  caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                  caption.runs[0].font.size = Pt(9)
                                  caption.runs[0].font.italic = True
-                                 file_obj.seek(0) # IMPORTANT : Réinitialise le curseur pour les exports suivants
+                                 file_obj.seek(0)
                          except Exception as e:
                              doc.add_paragraph(f'[Erreur photo {idx+1}: {e}]', style='Report Text')
                 doc.add_paragraph()
@@ -510,7 +503,6 @@ def create_word_report(collected_data, df_struct, project_data, start_time):
                 q_cell.paragraphs[0].runs[0].bold = True
                 doc.add_paragraph()
         
-        # Saut de page entre les phases
         if phase_idx < len(collected_data) - 1:
             doc.add_page_break()
     
@@ -563,13 +555,26 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
         idx = clean_opts.index(current_val) if current_val in clean_opts else 0
         val = st.selectbox("Sélection", clean_opts, index=idx, key=widget_key, label_visibility="collapsed")
     
+    # --- MODIFICATION CLÉ ICI ---
     elif q_type == 'number':
-        if q_id == 9: # Exemple d'un cas spécifique où le nombre doit être entier
+        # On s'assure que la valeur par défaut est un entier (0 si invalide)
+        try:
             default_val = int(float(current_val)) if current_val is not None and str(current_val).replace('.', '', 1).isdigit() else 0
-            val = st.number_input("Nombre (entier)", value=default_val, step=1, format="%d", key=widget_key, label_visibility="collapsed")
-        else:
-            default_val = float(current_val) if current_val and str(current_val).replace('.', '', 1).isdigit() else 0.0
-            val = st.number_input("Nombre", value=default_val, key=widget_key, label_visibility="collapsed")
+        except:
+            default_val = 0
+            
+        # On force l'entrée à être un entier : 
+        # - step=1 (boutons +1/-1)
+        # - format="%d" (affichage sans décimales)
+        val = st.number_input(
+            "Nombre (entier)", 
+            value=default_val, 
+            step=1, 
+            format="%d", 
+            key=widget_key, 
+            label_visibility="collapsed"
+        )
+    # -----------------------------
     
     elif q_type == 'photo':
         expected, details = get_expected_photo_count(phase_name.strip(), project_data)
@@ -577,16 +582,13 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
             st.info(f"📸 **Photos :** Il est attendu **{expected}** photos pour cette section (Base calculée : {details}).")
             st.divider()
         
-        # Récupère la liste des fichiers déjà chargés si l'utilisateur revient en arrière
         file_uploader_default = current_val if isinstance(current_val, list) else []
 
         val = st.file_uploader("Images", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True, key=widget_key, label_visibility="collapsed")
         
-        # Si de nouveaux fichiers sont uploadés, ils remplacent l'ancien contenu du widget
         if val:
             file_names = ", ".join([f.name for f in val])
             st.success(f"Nombre d'images chargées : {len(val)} ({file_names})")
-        # Si aucun nouveau fichier n'est uploadé, on réutilise ceux de l'état de session si le widget a été re-rendu
         elif file_uploader_default and isinstance(file_uploader_default, list):
             val = file_uploader_default
             names = ", ".join([getattr(f, 'name', 'Fichier') for f in val])
@@ -596,8 +598,12 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
     
     # Mise à jour des réponses
     if val is not None and (not is_dynamic_comment or str(val).strip() != ""): 
-        answers[q_id] = val 
+        # Pour les nombres, on force à stocker un entier
+        if q_type == 'number':
+            answers[q_id] = int(val) 
+        else:
+            answers[q_id] = val 
     elif current_val is not None and not is_dynamic_comment: 
-        answers[q_id] = current_val # Conserver la valeur précédente si le widget a été vidé
+        answers[q_id] = current_val 
     elif is_dynamic_comment and (val is None or str(val).strip() == ""):
-        if q_id in answers: del answers[q_id] # Supprimer le commentaire s'il est vide
+        if q_id in answers: del answers[q_id]
