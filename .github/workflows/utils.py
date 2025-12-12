@@ -512,9 +512,18 @@ def create_word_report(collected_data, df_struct, project_data, start_time):
     return word_buffer
 
 # --- COMPOSANT UI (rendu de la question) ---
+# --- COMPOSANT UI (rendu de la question) ---
 def render_question(row, answers, phase_name, key_suffix, loop_index, project_data):
     """
     Rendu d'une question dans Streamlit. Modifie le dictionnaire 'answers' en place.
+    
+    Arguments:
+        row (pd.Series): La ligne de la question (structure du formulaire).
+        answers (dict): Dictionnaire des réponses actuelles pour la phase en cours (modifié en place).
+        phase_name (str): Nom de la phase en cours.
+        key_suffix (str): ID unique pour garantir l'unicité des widgets Streamlit.
+        loop_index (int): Index de la question dans la boucle de rendu.
+        project_data (dict): Détails du projet pour les calculs.
     """
     q_id = int(row.get('id', 0))
     is_dynamic_comment = q_id == COMMENT_ID
@@ -555,26 +564,51 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
         idx = clean_opts.index(current_val) if current_val in clean_opts else 0
         val = st.selectbox("Sélection", clean_opts, index=idx, key=widget_key, label_visibility="collapsed")
     
-    # --- MODIFICATION CLÉ ICI ---
+    # --- LOGIQUE CLÉ POUR NUMBER (ENTIER vs DÉCIMAL) ---
     elif q_type == 'number':
-        # On s'assure que la valeur par défaut est un entier (0 si invalide)
-        try:
-            default_val = int(float(current_val)) if current_val is not None and str(current_val).replace('.', '', 1).isdigit() else 0
-        except:
-            default_val = 0
+        
+        # ATTENTION: DÉFINISSEZ ICI LES IDs des questions où l'entrée DOIT ÊTRE UN ENTIER.
+        # Par défaut, tout ce qui est 'number' est traité comme DÉCIMAL.
+        INTEGER_Q_IDS = [
+            # Exemple : 
+            # 9,  # Si Q9 est le nombre de poteaux
+            # 15, # Si Q15 est le nombre de techniciens
+            # ... Ajoutez ici vos IDs entiers ...
+        ]
+        
+        is_integer_count = q_id in INTEGER_Q_IDS
+        
+        # 2. Définition des paramètres
+        if is_integer_count:
+            label = "Nombre (Entier)"
+            # On force la valeur par défaut à l'entier (0 si invalide)
+            try:
+                # Convertit d'abord en float pour gérer les formats 'X.0'
+                default_val = int(float(current_val)) if current_val is not None and str(current_val).replace('.', '', 1).isdigit() else 0
+            except:
+                default_val = 0
+            step_val = 1
+            format_val = "%d"
             
-        # On force l'entrée à être un entier : 
-        # - step=1 (boutons +1/-1)
-        # - format="%d" (affichage sans décimales)
+        else: # Format décimal standard (par défaut)
+            label = "Nombre (Décimal possible)"
+            # On force la valeur par défaut à un float (0.0 si invalide)
+            try:
+                default_val = float(current_val) if current_val is not None and str(current_val).replace('.', '', 1).isdigit() else 0.0
+            except:
+                default_val = 0.0
+            step_val = 0.01 # Un pas par défaut de 0.01 pour les décimaux
+            format_val = "%.2f" # Affichage avec 2 décimales
+            
         val = st.number_input(
-            "Nombre (entier)", 
+            label, 
             value=default_val, 
-            step=1, 
-            format="%d", 
+            step=step_val, 
+            format=format_val, 
             key=widget_key, 
             label_visibility="collapsed"
         )
-    # -----------------------------
+    # -----------------------------------------------
     
     elif q_type == 'photo':
         expected, details = get_expected_photo_count(phase_name.strip(), project_data)
@@ -596,11 +630,16 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
         
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # Mise à jour des réponses
+    # Mise à jour des réponses dans le dictionnaire 'answers'
     if val is not None and (not is_dynamic_comment or str(val).strip() != ""): 
-        # Pour les nombres, on force à stocker un entier
+        # Conversion du type stocké
         if q_type == 'number':
-            answers[q_id] = int(val) 
+            if is_integer_count:
+                 # On stocke l'entier
+                 answers[q_id] = int(val)
+            else:
+                 # On stocke le décimal
+                 answers[q_id] = float(val) 
         else:
             answers[q_id] = val 
     elif current_val is not None and not is_dynamic_comment: 
