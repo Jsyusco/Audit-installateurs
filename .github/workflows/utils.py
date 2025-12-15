@@ -1,4 +1,4 @@
-# utils.py (Avec gestion des conditions 'ET' et 'OU')
+# utils.py (Avec gestion des conditions 'ET' et 'OU' et affichage de debug)
 import streamlit as st
 import pandas as pd
 import uuid
@@ -169,6 +169,8 @@ def evaluate_single_condition(condition_str, all_answers):
     try:
         target_id_str, expected_value_raw = condition_str.split('=', 1)
         target_id = int(target_id_str.strip())
+        
+        # Nettoie les guillemets/apostrophes pour la comparaison
         expected_value = expected_value_raw.strip().strip('"').strip("'")
         
         user_answer = all_answers.get(target_id)
@@ -185,9 +187,6 @@ def check_condition(row, current_answers, collected_data):
     """
     Vérifie si une question doit être affichée en fonction des réponses précédentes.
     Gère les opérateurs 'ET' et 'OU'.
-    Priorité : Le 'OU' sépare les blocs majeurs, le 'ET' lie les conditions au sein d'un bloc.
-    Exemple : "10=Oui ET 11=Non OU 12=Peut-être" 
-    sera interprété comme : (10=Oui ET 11=Non) OU (12=Peut-être)
     """
     try:
         # Si 'Condition on' n'est pas 1, la condition est inactive -> on affiche
@@ -200,7 +199,7 @@ def check_condition(row, current_answers, collected_data):
         all_past_answers.update(phase_data['answers'])
     combined_answers = {**all_past_answers, **current_answers}
     
-    condition_raw = str(row.get('Condition value', '')).strip()
+    condition_raw = str(row.get('Condition value', '')).strip().strip('"').strip("'")
     if not condition_raw: return True
 
     # 1. Découpage par "OU" (Si un des blocs est Vrai, tout est Vrai)
@@ -212,7 +211,7 @@ def check_condition(row, current_answers, collected_data):
         block_is_valid = True
         
         for atom in and_conditions:
-            # Utilisation de la nouvelle fonction pour évaluer chaque condition unitaire
+            # Utilisation de la fonction evaluate_single_condition
             if not evaluate_single_condition(atom, combined_answers):
                 block_is_valid = False
                 break # Une condition du ET est fausse, le bloc est faux
@@ -300,7 +299,7 @@ def validate_section(df_questions, section_name, answers, collected_data, projec
 
     return len(missing) == 0, missing
 
-# --- SAUVEGARDE ET EXPORTS ---
+# --- SAUVEGARDE ET EXPORTS (Fonctions inchangées) ---
 def save_form_data(collected_data, project_data, submission_id, start_time):
     # ... code inchangé ...
     try:
@@ -554,14 +553,9 @@ def create_word_report(collected_data, df_struct, project_data, start_time):
     return word_buffer
 
 # --- COMPOSANT UI (rendu de la question) ---
-# utils.py
-
-# ... (toutes les fonctions précédentes restent inchangées)
-
-# --- COMPOSANT UI (rendu de la question) ---
 def render_question(row, answers, phase_name, key_suffix, loop_index, project_data):
     """
-    Rendu d'une question dans Streamlit. Modifie le dictionnaire 'answers' en place.
+    Rendu d'une question dans Streamlit, avec affichage de la condition et debug.
     """
     q_id = int(row.get('id', 0))
     is_dynamic_comment = q_id == COMMENT_ID
@@ -572,7 +566,7 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
         q_desc = "Ce champ est obligatoire si le nombre de photos n'est pas conforme."
         q_mandatory = True 
         q_options = []
-        condition_display = "" # Pas de condition pour le commentaire
+        condition_display = ""
     else:
         q_text = row['question']
         q_type = str(row['type']).strip().lower() 
@@ -586,17 +580,13 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
         
         condition_display = ""
         if condition_on == 1 and condition_value:
-             # 1. Nettoyer les guillemets/apostrophes pour l'affichage (car la DB les contient)
-            # .strip() élimine les espaces
-            # .strip('"') élimine les guillemets doubles
-            # .strip("'") élimine les apostrophes
+             # Nettoyer les guillemets/apostrophes pour l'affichage (si la DB les inclut)
             display_value = condition_value.strip().strip('"').strip("'") 
             
-            # 2. Afficher la condition (si elle n'est pas vide après nettoyage)
             if display_value:
                 condition_display = (
                     f'<span style="font-size: 0.8em; color: #a0a0a0; font-weight: normal; margin-left: 10px;">'
-                    f'[Condition: {display_value}]' # Utilisation de display_value nettoyé
+                    f'[Condition: {display_value}]'
                     f'</span>'
                 )
         # ------------------------------------------------------------
@@ -615,13 +605,13 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
     current_val = answers.get(q_id)
     val = current_val
 
-    # Ligne de débogage - DÉCOMMENTEZ POUR VÉRIFIER LES VALEURS LUES PAR PYTHON
+    # LIGNE DE DÉBOGAGE : Affiche les valeurs de la condition lues par Python
     st.write(f"DEBUG Q{q_id}: Condition on={row.get('Condition on')}, Condition value='{row.get('Condition value')}'")
 
     st.markdown(f'<div class="question-card"><div>{label_html}</div>', unsafe_allow_html=True)
     if q_desc: st.markdown(f'<div class="description">⚠️ {q_desc}</div>', unsafe_allow_html=True)
     
-    # Éléments de formulaire (inchangés depuis ma proposition précédente)
+    # Éléments de formulaire
     if q_type == 'text':
         default_val = current_val if current_val else ""
         if is_dynamic_comment:
