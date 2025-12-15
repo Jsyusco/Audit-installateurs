@@ -1,684 +1,622 @@
+# utils.py (À placer dans votre repository partagé 'shared-utils')
 import streamlit as st
 import pandas as pd
+import uuid
 import firebase_admin
-from firebase_admin import firestore, credentials
+from firebase_admin import credentials, firestore
 from datetime import datetime
-from io import BytesIO
+import numpy as np
 import zipfile
-import base64
+import io
+import urllib.parse
 from docx import Document
-from docx.shared import Inches, Pt
+from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import RGBColor
+from docx.enum.style import WD_STYLE_TYPE
+from docx.enum.table import WD_ALIGN_VERTICAL
 
-# --- Constantes (À adapter si nécessaire) ---
-# La section d'identification est censée être la première ligne du df_struct
-COMMENT_ID = 99999 
-
-# Mapping pour renommer les colonnes des données Projet dans l'affichage
+# --- CONSTANTES ---
 PROJECT_RENAME_MAP = {
-    'Localisation': 'Ville',
-    'Date de mise en service': 'Date MS',
-    'Nb PDL Standard': 'PDL Standard',
-    'Puissance Standard (kW)': 'P. Std (kW)',
-    'Nb PDL Pré-équipés': 'PDL Pré-équipés',
-    'Puissance Pré-équipée (kW)': 'P. Pré-eq (kW)',
-    'Type': 'Type de site'
+    'Intitulé': 'Intitulé',
+    'Fournisseur Bornes AC [Bornes]': 'Fournisseur Bornes AC',
+    'Fournisseur Bornes DC [Bornes]': 'Fournisseur Bornes DC',
+    'L [Plan de Déploiement]': 'PDC Lent',
+    'R [Plan de Déploiement]': 'PDC Rapide',
+    'UR [Plan de Déploiement]': 'PDC Ultra-rapide',
+    'Pré L [Plan de Déploiement]': 'PDC L pré-équipés',
+    'Pré R [Plan de Déploiement]': 'PDC R pré-équipés',
+    'Pré UR [Plan de Déploiement]': 'PDC UR pré-équipés',
 }
 
-# Groupes de champs du projet pour l'affichage dans l'expander
 DISPLAY_GROUPS = [
-    ['Localisation', 'Type', 'Date de mise en service'],
-    ['Nb PDL Standard', 'Puissance Standard (kW)', 'Type PDL Standard'],
-    ['Nb PDL Pré-équipés', 'Puissance Pré-équipée (kW)', 'Type PDL Pré-équipés']
+    ['Intitulé', 'Fournisseur Bornes AC [Bornes]', 'Fournisseur Bornes DC [Bornes]'],
+    ['L [Plan de Déploiement]', 'R [Plan de Déploiement]', 'UR [Plan de Déploiement]'],
+    ['Pré L [Plan de Déploiement]', 'Pré R [Plan de Déploiement]', 'Pré UR [Plan de Déploiement]'],
 ]
 
-# --- 1. INITIALISATION DE FIREBASE ---
+SECTION_PHOTO_RULES = {
+    "Bornes DC": ['R [Plan de Déploiement]', 'UR [Plan de Déploiement]'],
+    "Bornes AC": ['L [Plan de Déploiement]'],
+    # Ajoutez ici d'autres sections nécessitant des calculs de photos si nécessaire
+}
 
-def setup_firebase():
-    """Initialise Firebase si ce n'est pas déjà fait."""
+COMMENT_ID = 100
+COMMENT_QUESTION = "Veuillez préciser pourquoi le nombre de photo partagé ne correspond pas au minimum attendu"
+
+# --- INITIALISATION FIREBASE ---
+def initialize_firebase():
+    """
+    Initialise Firebase si ce n'est pas déjà fait. 
+    Lit les secrets Streamlit au niveau racine (firebase_...).
+    """
     if not firebase_admin._apps:
         try:
-            # Récupération des secrets depuis Streamlit
-            firebase_config = st.secrets["firebase"]
-            cred_json = {
-                "type": "service_account",
-                "project_id": firebase_config["project_id"],
-                "private_key_id": firebase_config["private_key_id"],
-                "private_key": firebase_config["private_key"].replace('\\n', '\n'),
-                "client_email": firebase_config["client_email"],
-                "client_id": firebase_config["client_id"],
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-                "client_x509_cert_url": firebase_config["client_x509_cert_url"]
+            # Lecture des secrets sans la section [firebase]
+            cred_dict = {
+                "type": st.secrets["firebase_type"],
+                "project_id": st.secrets["firebase_project_id"],
+                "private_key_id": st.secrets["firebase_private_key_id"],
+                "private_key": st.secrets["firebase_private_key"].replace('\\n', '\n'),
+                "client_email": st.secrets["firebase_client_email"],
+                "client_id": st.secrets["firebase_client_id"],
+                "auth_uri": st.secrets["firebase_auth_uri"],
+                "token_uri": st.secrets["firebase_token_uri"],
+                "auth_provider_x509_cert_url": st.secrets["firebase_auth_provider_x509_cert_url"],
+                "client_x509_cert_url": st.secrets["firebase_client_x509_cert_url"],
+                "universe_domain": st.secrets["firebase_universe_domain"],
             }
             
-            cred = credentials.Certificate(cred_json)
-            firebase_admin.initialize_app(cred)
-            return firestore.client()
+            project_id = cred_dict["project_id"]
+            cred = credentials.Certificate(cred_dict)
+            firebase_admin.initialize_app(cred, {'projectId': project_id})
         except Exception as e:
-            st.error(f"Erreur d'initialisation de Firebase : {e}")
-            return None
+            st.error(f"Erreur de connexion Firebase : {e}")
+            st.stop() 
+            
     return firestore.client()
 
-DB = setup_firebase()
+# Initialisation unique du client DB pour ce module
+db = initialize_firebase()
 
-# --- 2. FONCTIONS DE CHARGEMENT DE DONNÉES (mise en cache) ---
-
+# --- CHARGEMENT DONNÉES (mise en cache) ---
 @st.cache_data(ttl=3600)
 def load_form_structure_from_firestore():
-    """Charge la structure du formulaire depuis Firestore."""
-    if DB is None: return None
+    """Charge la structure du formulaire depuis la collection 'formsquestions'."""
     try:
-        docs = DB.collection('form_structure').stream()
+        docs = db.collection('formsquestions').order_by('id').get()
         data = [doc.to_dict() for doc in docs]
-        if not data:
-            st.warning("Collection 'form_structure' vide.")
-            return pd.DataFrame()
-            
+        if not data: return None
         df = pd.DataFrame(data)
-        # Assurer que les colonnes clés existent pour éviter des erreurs
-        required_cols = ['id', 'question', 'type', 'section', 'mandatory', 'condition']
-        for col in required_cols:
-            if col not in df.columns:
-                df[col] = ''
+        df.columns = df.columns.str.strip()
         
-        # S'assurer que 'id' est un entier pour le matching
-        df['id'] = pd.to_numeric(df['id'], errors='coerce').fillna(0).astype(int)
+        # Normalisation des noms de colonnes (résout les problèmes de typo)
+        rename_map = {'Conditon value': 'Condition value', 'condition value': 'Condition value', 'Condition Value': 'Condition value', 'Condition': 'Condition value', 'Conditon on': 'Condition on', 'condition on': 'Condition on'}
+        actual_rename = {k: v for k, v in rename_map.items() if k in df.columns}
+        df = df.rename(columns=actual_rename)
         
-        # Trier par ID pour s'assurer de l'ordre d'affichage
-        df = df.sort_values(by='id').reset_index(drop=True)
+        expected_cols = ['options', 'Description', 'Condition value', 'Condition on', 'section', 'id', 'question', 'type', 'obligatoire']
+        for col in expected_cols:
+            if col not in df.columns: df[col] = np.nan 
+        
+        # Nettoyage et typage
+        df['options'] = df['options'].fillna('')
+        df['Description'] = df['Description'].fillna('')
+        df['Condition value'] = df['Condition value'].fillna('')
+        df['Condition on'] = df['Condition on'].apply(lambda x: int(x) if pd.notna(x) and str(x).isdigit() else 0)
+        
+        for col in df.select_dtypes(include=['object']).columns:
+            df[col] = df[col].astype(str).str.strip()
+            try:
+                # Tentative d'encodage/décodage pour gérer les caractères spéciaux (si nécessaire)
+                df[col] = df[col].apply(lambda x: x.encode('utf-8', 'ignore').decode('utf-8', 'ignore'))
+            except Exception: pass 
         return df
     except Exception as e:
-        st.error(f"Erreur lors du chargement de la structure : {e}")
+        st.error(f"Erreur lors du chargement de la structure du formulaire: {e}")
         return None
 
 @st.cache_data(ttl=3600)
 def load_site_data_from_firestore():
-    """Charge les données des sites depuis Firestore."""
-    if DB is None: return None
+    """Charge les données des sites depuis la collection 'Sites'."""
     try:
-        docs = DB.collection('sites').stream()
+        docs = db.collection('Sites').get()
         data = [doc.to_dict() for doc in docs]
-        df = pd.DataFrame(data)
-        if 'Intitulé' not in df.columns:
-            st.warning("Colonne 'Intitulé' manquante dans les données Sites.")
-        return df
+        if not data: return None
+        df_site = pd.DataFrame(data)
+        df_site.columns = df_site.columns.str.strip()
+        return df_site
     except Exception as e:
-        st.error(f"Erreur lors du chargement des données des sites : {e}")
+        st.error(f"Erreur lors du chargement des données des sites: {e}")
         return None
 
-# --- 3. LOGIQUE DE CONDITION (Le cœur de la correction) ---
+# --- LOGIQUE MÉTIER ---
+def get_expected_photo_count(section_name, project_data):
+    """Calcule le nombre de photos attendues pour une section donnée."""
+    if section_name.strip() not in SECTION_PHOTO_RULES:
+        return None, None 
 
-def _evaluate_simple_term(term_string, combined_answers, project_data):
-    """
-    Évalue une sous-condition simple (ex: "10 = Oui", "Site = Mairie")
-    et retourne True ou False.
-    """
-    term = term_string.strip()
-    
-    # 1. Déterminer l'opérateur de comparaison
-    op_raw = None
-    op_python = None
-    
-    if ' <> ' in term:
-        op_raw = ' <> '
-        op_python = ' != '
-    elif ' = ' in term:
-        op_raw = ' = '
-        op_python = ' == '
-    else:
-        # st.warning(f"Condition mal formatée : '{term_string}'")
-        return False
-        
-    try:
-        # Séparer la clé et la valeur attendue
-        parts = term.split(op_raw.strip(), 1)
-        if len(parts) != 2: return False # Robuste
-        
-        key_raw = parts[0].strip()
-        expected_value = parts[1].strip().strip('"').strip("'")
-        
-        # 2. Récupérer la réponse réelle
-        user_answer = None
-        
-        if key_raw.isdigit():
-            # C'est un ID de question (vient de combined_answers)
-            q_num = int(key_raw)
-            user_answer = combined_answers.get(q_num)
-        else:
-            # C'est une clé de Projet (vient de project_data)
-            user_answer = project_data.get(key_raw)
-            
-        # Si la clé n'est pas trouvée ou n'a pas été répondue, la condition est Fausse
-        if user_answer is None:
-            return False
+    columns = SECTION_PHOTO_RULES[section_name.strip()]
+    total_expected = 0
+    details = []
 
-        # 3. Comparaison
-        actual_answer_str = str(user_answer).strip().lower()
-        expected_value_lower = expected_value.lower()
-        
-        if op_python == ' == ':
-            return actual_answer_str == expected_value_lower
-        elif op_python == ' != ':
-            return actual_answer_str != expected_value_lower
-        
-        return False
-
-    except Exception as e:
-        # st.error(f"Erreur critique lors de l'évaluation du terme '{term_string}' : {e}")
-        return False
-
-
-def check_condition(row, current_phase_answers, collected_data):
-    """
-    Vérifie si la condition d'une question est remplie.
-    Supporte les conditions complexes (ET/OU) et les comparaisons (= / <>).
-    """
-    condition_str = row.get('condition', '').strip()
-    
-    # Pas de condition, la question est toujours visible
-    if not condition_str:
-        return True
-
-    # Fusionner les réponses actuelles et l'historique
-    combined_answers = current_phase_answers.copy()
-    for entry in collected_data:
-        combined_answers.update(entry['answers'])
-        
-    # Le cas 'Identification' est toujours la première entrée (si complétée)
-    project_data = st.session_state.get('project_data', {})
-
-    # Remplacement des opérateurs logiques pour le split
-    temp_condition = condition_str.upper().replace(' ET ', ' AND ').replace(' OU ', ' OR ')
-    
-    # Utiliser un séparateur unique pour ne pas confondre avec = ou <>
-    # On isole les conditions simples et les opérateurs logiques
-    temp_condition = temp_condition.replace(' AND ', '||AND||').replace(' OR ', '||OR||')
-    
-    parts = [p.strip() for p in temp_condition.split('||') if p.strip()]
-    
-    if not parts:
-        return True
-        
-    # 5. Construction de l'expression booléenne finale
-    final_expression_eval = ""
-    
-    for part in parts:
-        part = part.strip()
-        
-        if part == 'AND':
-            final_expression_eval += ' and '
-        elif part == 'OR':
-            final_expression_eval += ' or '
-        elif part: 
-            # Évaluation du terme simple (ex: "10 = Oui")
-            term_result = _evaluate_simple_term(part, combined_answers, project_data)
-            # Ajout du résultat booléen (True ou False) à l'expression à évaluer
-            final_expression_eval += str(term_result)
-
-    # 6. Évaluation finale
-    try:
-        return eval(final_expression_eval)
-    except Exception as e:
-        # st.error(f"Erreur d'évaluation finale de la condition '{condition_str}': {e}")
-        return False
-
-# --- 4. FONCTION DE RENDU DE QUESTION ---
-
-def render_question(row, answers_dict, phase_name, iteration_id, index, project_data=None):
-    """Rend un widget Streamlit basé sur le type de question."""
-    q_id = int(row.get('id', 0))
-    q_text = row.get('question', 'QUESTION SANS TEXTE').strip()
-    q_type = str(row.get('type', 'text')).strip().lower()
-    mandatory = str(row.get('mandatory', 'NON')).strip().upper() == 'OUI'
-    options = str(row.get('options', '')).strip().split(';')
-    
-    # Clé unique pour Streamlit : évite les conflits entre phases et itérations
-    key = f"{phase_name}_{q_id}_{iteration_id}_{index}"
-    
-    # Texte du label
-    label_text = f"{q_text} ({q_id})"
-    if mandatory and q_id != COMMENT_ID:
-        label_text += '<span class="mandatory">*</span>'
-
-    # Gestion de la description du projet pour l'étape Identification
-    if q_id == 1 and phase_name == st.session_state['df_struct']['section'].iloc[0]:
-        q_text = f"Projet : **{project_data.get('Intitulé', 'N/A')}** - {q_text}"
-        label_text = f"{q_text} ({q_id})"
-    
-    if q_id == COMMENT_ID:
-        q_text = "Justification (Obligatoire si photos manquantes)"
-        label_text = f"{q_text} (ID {COMMENT_ID})"
-        # Le champ commentaire est toujours multi-lignes et non obligatoire par défaut
-        q_type = 'textarea'
-        
-    with st.container():
-        st.markdown(f'<div class="question-card">', unsafe_allow_html=True)
-        
-        # Le conteneur du label
-        st.markdown(f'<div class="description">{label_text}</div>', unsafe_allow_html=True)
-        
-        # Si la question existe déjà dans l'état de session, on pré-remplit
-        default_value = answers_dict.get(q_id, '')
-
-        # Rendu du widget
-        if q_type == 'select' and options:
-            options_list = [''] + [opt.strip() for opt in options]
-            selection = st.selectbox(
-                label="", 
-                options=options_list, 
-                key=key, 
-                index=options_list.index(default_value) if default_value in options_list else 0
-            )
-            answers_dict[q_id] = selection
-
-        elif q_type == 'radio' and options:
-            options_list = [opt.strip() for opt in options]
-            # Utilisation de la valeur par défaut ou None si non défini
-            initial_index = options_list.index(default_value) if default_value in options_list else -1
-            selection = st.radio(
-                label="", 
-                options=options_list, 
-                key=key, 
-                index=initial_index,
-                horizontal=True
-            )
-            answers_dict[q_id] = selection
-
-        elif q_type == 'number':
-            try:
-                # Si la valeur par défaut est une chaîne, on essaie de la convertir en float
-                default_val_num = float(default_value) if default_value else None
-            except ValueError:
-                default_val_num = None
-                
-            number_input = st.number_input(
-                label="", 
-                value=default_val_num, 
-                key=key,
-                step=1 if default_val_num is None or default_val_num == int(default_val_num) else 0.1
-            )
-            # Sauvegarder la valeur comme chaîne ou None
-            answers_dict[q_id] = str(number_input) if number_input is not None else None
-
-        elif q_type == 'photo':
-            # Widget de téléchargement de fichier
-            uploaded_file = st.file_uploader(
-                label="Prendre une photo ou télécharger un fichier image", 
-                type=['png', 'jpg', 'jpeg'], 
-                key=key
-            )
-            
-            if uploaded_file:
-                # Stocker l'image encodée en base64 dans les réponses
-                answers_dict[q_id] = {
-                    "filename": uploaded_file.name,
-                    "b64_data": base64.b64encode(uploaded_file.getvalue()).decode('utf-8')
-                }
-            elif q_id in answers_dict and answers_dict[q_id]:
-                 # Si une photo était déjà là, la garder si l'utilisateur ne la change pas
-                 st.caption(f"Fichier déjà enregistré : **{answers_dict[q_id].get('filename', 'Inconnu')}**")
+    for col in columns:
+        val = project_data.get(col, 0)
+        try:
+            if pd.isna(val) or val == "":
+                num = 0
             else:
-                 answers_dict[q_id] = None # Aucune photo
+                # Convertit la valeur en entier (gère les formats décimaux avec virgule/point)
+                num = int(float(str(val).replace(',', '.'))) 
+        except Exception:
+            num = 0
+        
+        total_expected += num
+        short_name = PROJECT_RENAME_MAP.get(col, col) 
+        details.append(f"{num} {short_name}")
 
-        elif q_type == 'date':
-            default_date = None
-            try:
-                if default_value:
-                    default_date = datetime.strptime(str(default_value), '%Y-%m-%d').date()
-            except:
-                pass # Laisser la date par défaut à None si le format est mauvais
+    detail_str = " + ".join(details)
+    return total_expected, detail_str
 
-            date_input = st.date_input(
-                label="",
-                value=default_date,
-                key=key
-            )
-            answers_dict[q_id] = str(date_input) if date_input else None
-            
-        elif q_type == 'textarea':
-            text_input = st.text_area(
-                label="",
-                value=str(default_value) if default_value else "",
-                key=key
-            )
-            answers_dict[q_id] = text_input
+def check_condition(row, current_answers, collected_data):
+    """Vérifie si une question doit être affichée en fonction des réponses précédentes."""
+    try:
+        if int(row.get('Condition on', 0)) != 1: return True
+    except (ValueError, TypeError): return True
 
-        elif q_type == 'text' or q_id == COMMENT_ID:
-            text_input = st.text_input(
-                label="",
-                value=str(default_value) if default_value else "",
-                key=key
-            )
-            answers_dict[q_id] = text_input
-            
-        st.markdown('</div>', unsafe_allow_html=True)
-
-
-# --- 5. FONCTION DE VALIDATION ---
-
-def validate_section(df_struct, section_name, answers, collected_data, project_data):
-    """Valide les champs obligatoires de la section et la justification de l'écart."""
-    section_rows = df_struct[df_struct['section'] == section_name]
-    missing = []
+    all_past_answers = {}
+    for phase_data in collected_data: all_past_answers.update(phase_data['answers'])
+    combined_answers = {**all_past_answers, **current_answers}
     
-    # Fusionner les réponses (pour check_condition)
-    combined_answers = {}
-    for entry in collected_data:
-        combined_answers.update(entry['answers'])
-    combined_answers.update(answers)
+    condition_str = str(row.get('Condition value', '')).strip()
+    if not condition_str or "=" not in condition_str: return True
 
-    # 1. Vérification des champs obligatoires et visibles
-    is_photo_count_incorrect = False
-    photo_count_ok = 0
+    try:
+        target_id_str, expected_value_raw = condition_str.split('=', 1)
+        target_id = int(target_id_str.strip())
+        expected_value = expected_value_raw.strip().strip('"').strip("'")
+        user_answer = combined_answers.get(target_id)
+        
+        if user_answer is not None:
+            return str(user_answer).lower() == str(expected_value).lower()
+        else:
+            return False
+    except Exception: return True
+
+def validate_section(df_questions, section_name, answers, collected_data, project_data):
+    """Valide les réponses d'une section, y compris le compte de photos si applicable."""
+    missing = []
+    section_rows = df_questions[df_questions['section'] == section_name]
+    
+    comment_val = answers.get(COMMENT_ID)
+    has_justification = comment_val is not None and str(comment_val).strip() != ""
+    
+    # 1. Calcul du nombre de photos attendu
+    expected_total_base, detail_str = get_expected_photo_count(section_name.strip(), project_data)
+    expected_total = expected_total_base
+    
+    photo_question_count = sum(
+        1 for _, row in section_rows.iterrows()
+        if str(row.get('type', '')).strip().lower() == 'photo' and check_condition(row, answers, collected_data)
+    )
+    
+    if expected_total is not None and expected_total > 0:
+        expected_total = expected_total_base * photo_question_count
+        detail_str = (
+            f"{detail_str} | Questions photo visibles: {photo_question_count} "
+            f"-> Total ajusté: {expected_total}"
+        )
+
+    # 2. Compte des photos soumises
+    current_photo_count = 0
+    photo_questions_found = False
     
     for _, row in section_rows.iterrows():
-        q_id = int(row.get('id', 0))
-        q_text = row.get('question', 'Question sans texte')
-        q_type = str(row.get('type', 'text')).strip().lower()
-        mandatory = str(row.get('mandatory', 'NON')).strip().upper() == 'OUI'
+        q_type = str(row['type']).strip().lower()
+        if q_type == 'photo' and check_condition(row, answers, collected_data):
+            photo_questions_found = True
+            q_id = int(row['id'])
+            val = answers.get(q_id)
+            if isinstance(val, list):
+                current_photo_count += len(val)
 
-        # Le commentaire (ID 99999) n'est jamais obligatoire dans la structure de base
-        if q_id == COMMENT_ID:
-            continue
-            
-        # Vérifie si la question doit être visible selon les conditions
-        if check_condition(row, answers, collected_data):
-            answer = answers.get(q_id)
-            
-            # Gestion des champs obligatoires (hors photos)
-            if mandatory and (answer is None or str(answer).strip() == ''):
-                missing.append(f"Le champ obligatoire '{q_text}' (ID {q_id}) est manquant.")
-                
-            # Gestion spéciale pour les photos obligatoires
-            if q_type == 'photo' and mandatory:
-                if answer and isinstance(answer, dict) and answer.get('b64_data'):
-                    photo_count_ok += 1
-                else:
-                    missing.append(f"La photo obligatoire '{q_text}' (ID {q_id}) est manquante.")
-                    is_photo_count_incorrect = True
-            
-            # Gestion spéciale pour les photos NON obligatoires (doivent être justifiées si manquent)
-            if q_type == 'photo' and not mandatory:
-                if answer is None or not answer.get('b64_data'):
-                    is_photo_count_incorrect = True
-            
-    # 2. Logique de Justification de l'Écart (ID 99999)
-    if is_photo_count_incorrect:
-        comment = answers.get(COMMENT_ID)
-        # Si une photo obligatoire manque OU si une photo non obligatoire manque
-        if comment is None or str(comment).strip() == '':
-            missing.append(f"Le Commentaire (ID {COMMENT_ID}) est obligatoire pour justifier l'absence d'une photo (obligatoire ou non obligatoire).")
+    # 3. Vérification des champs obligatoires (hors photos)
+    for _, row in section_rows.iterrows():
+        q_id = int(row['id'])
+        if q_id == COMMENT_ID: continue
+        if not check_condition(row, answers, collected_data): continue
         
-    # 3. Nettoyage et retour
-    # Si toutes les photos ont été soumises ou si aucune photo n'est manquante, 
-    # on retire le commentaire au cas où il ait été rempli par erreur (ou n'était pas nécessaire)
+        is_mandatory = str(row['obligatoire']).strip().lower() == 'oui'
+        q_type = str(row['type']).strip().lower()
+        val = answers.get(q_id)
+        
+        if is_mandatory and q_type != 'photo':
+            if isinstance(val, list):
+                if not val: missing.append(f"Question {q_id} : {row['question']} (fichier(s) manquant(s))")
+            elif val is None or val == "" or (isinstance(val, (int, float)) and val == 0):
+                missing.append(f"Question {q_id} : {row['question']}")
+
+    # 4. Vérification de l'écart de photos et du commentaire
+    is_photo_count_incorrect = False
+    if expected_total is not None and expected_total > 0:
+        if photo_questions_found and current_photo_count != expected_total:
+            is_photo_count_incorrect = True
+            error_message = (
+                f"⚠️ **Écart de Photos pour '{str(section_name)}'**.\n"
+                f"Attendu : **{str(expected_total)}** (calculé : {str(detail_str)}).\n"
+                f"Reçu : **{str(current_photo_count)}**.\n"
+            )
+            if not has_justification:
+                missing.append(
+                    f"**Commentaire (ID {COMMENT_ID}) :** {COMMENT_QUESTION} "
+                    f"(requis en raison de l'écart de photo : Attendu {expected_total}, Reçu {current_photo_count}).\n\n"
+                    f"{error_message}"
+                )
+
+    # Nettoyage : Si le compte est bon, on retire le commentaire au cas où il ait été rempli par erreur
     if not is_photo_count_incorrect and COMMENT_ID in answers:
         del answers[COMMENT_ID]
 
     return len(missing) == 0, missing
 
-# --- 6. FONCTION DE SAUVEGARDE FIREBASE ---
-
-def save_form_data(collected_data, project_data, submission_id, form_start_time):
-    """Sauvegarde les données finales dans la collection 'submissions'."""
-    if DB is None: return False, "DB non initialisée."
-    
-    # 1. Préparation de la structure de la soumission
-    submission_doc = {
-        "submission_id": submission_id,
-        "project_intitule": project_data.get('Intitulé', 'Projet Inconnu'),
-        "project_details": project_data,
-        "form_start_time": form_start_time.isoformat(),
-        "form_end_time": datetime.now().isoformat(),
-        "phases_data": []
-    }
-    
-    # 2. Traitement des données collectées pour la sauvegarde (séparation des photos)
-    for phase_entry in collected_data:
-        phase_name = phase_entry['phase_name']
-        answers = phase_entry['answers']
-        
-        phase_answers_clean = {}
-        photos_to_save = {}
-        
-        for q_id, answer in answers.items():
-            if isinstance(answer, dict) and 'b64_data' in answer:
-                # C'est une photo. On stocke l'URL de l'image (pourrait être une URL de Firebase Storage si implémenté)
-                # Pour l'instant, on stocke juste le nom du fichier dans la réponse principale et la b64 dans une sous-collection
-                phase_answers_clean[str(q_id)] = f"[Photo: {answer['filename']}]"
-                photos_to_save[str(q_id)] = answer
-            else:
-                phase_answers_clean[str(q_id)] = answer
-                
-        submission_doc["phases_data"].append({
-            "phase_name": phase_name,
-            "answers": phase_answers_clean,
-            # Le stockage des photos dans la même doc Firestore est acceptable pour des petites images.
-            # Pour des images volumineuses, il faudrait utiliser Firebase Storage.
-            "photos": photos_to_save
-        })
-        
-    # 3. Sauvegarde de la soumission principale
+# --- SAUVEGARDE ET EXPORTS (inchangées) ---
+def save_form_data(collected_data, project_data, submission_id, start_time):
+    # ... code inchangé ...
     try:
-        doc_ref = DB.collection('submissions').document(submission_id)
-        doc_ref.set(submission_doc)
-        return True, submission_id
+        cleaned_data = []
+        for phase in collected_data:
+            clean_phase = {
+                "phase_name": phase["phase_name"],
+                "answers": {}
+            }
+            # Remplace les objets FileUpload par des noms de fichiers
+            for k, v in phase["answers"].items():
+                if isinstance(v, list) and v and hasattr(v[0], 'read'): 
+                    file_names = ", ".join([f.name for f in v])
+                    clean_phase["answers"][str(k)] = f"Fichiers (non stockés en DB): {file_names}"
+                
+                elif hasattr(v, 'read'): 
+                     clean_phase["answers"][str(k)] = f"Fichier (non stocké en DB): {v.name}"
+                else:
+                    clean_phase["answers"][str(k)] = v
+            
+            cleaned_data.append(clean_phase)
+        
+        final_document = {
+            "project_intitule": project_data.get('Intitulé', 'N/A'),
+            "project_details": project_data,
+            "submission_id": submission_id,
+            "start_date": start_time,
+            "submission_date": datetime.now(),
+            "status": "Completed",
+            "collected_phases": cleaned_data
+        }
+        
+        doc_id_base = str(project_data.get('Intitulé', 'form')).replace(" ", "_").replace("/", "_")[:20]
+        doc_id = f"{doc_id_base}_{datetime.now().strftime('%Y%m%d_%H%M')}_{submission_id[:6]}"
+        
+        db.collection('FormAnswers').document(doc_id).set(final_document)
+        return True, doc_id 
     except Exception as e:
         return False, str(e)
 
+def create_csv_export(collected_data, df_struct, project_name, submission_id, start_time):
+    # ... code inchangé ...
+    rows = []
+    start_time_str = start_time.strftime('%Y-%m-%d %H:%M:%S') if isinstance(start_time, datetime) else 'N/A'
+    end_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-# --- 7. FONCTIONS D'EXPORT ---
-
-def create_csv_export(collected_data, df_struct, project_name, submission_id, form_start_time):
-    """Crée un buffer CSV avec toutes les réponses."""
-    
-    # 1. Préparation de toutes les colonnes
-    column_mapping = {row['id']: row['question'] for _, row in df_struct.iterrows() if row.get('id')}
-    all_q_ids = sorted(column_mapping.keys())
-    
-    # Colonnes de métadonnées
-    meta_cols = ['submission_id', 'project_name', 'form_start_time', 'phase_name']
-    header = meta_cols + [column_mapping.get(qid, f"Q_ID_{qid}") for qid in all_q_ids]
-    
-    # 2. Construction des lignes de données
-    data_rows = []
-    for phase_entry in collected_data:
-        phase_name = phase_entry['phase_name']
-        answers = phase_entry['answers']
-        
-        row_data = {
-            'submission_id': submission_id,
-            'project_name': project_name,
-            'form_start_time': form_start_time.strftime('%Y-%m-%d %H:%M:%S'),
-            'phase_name': phase_name
-        }
-        
-        # Remplissage des réponses
-        for qid in all_q_ids:
-            answer = answers.get(qid)
+    for item in collected_data:
+        phase_name = item['phase_name']
+        for q_id, val in item['answers'].items():
             
-            if isinstance(answer, dict) and 'b64_data' in answer:
-                # Réponse photo (on met le nom du fichier)
-                value = f"[Photo: {answer.get('filename', 'N/A')}]"
-            elif answer is not None:
-                value = str(answer)
+            if int(q_id) == COMMENT_ID:
+                q_text = "Commentaire Écart Photo"
             else:
-                value = ''
+                q_row = df_struct[df_struct['id'] == int(q_id)]
+                q_text = q_row.iloc[0]['question'] if not q_row.empty else f"Question ID {q_id}"
             
-            row_data[column_mapping.get(qid, f"Q_ID_{qid}")] = value
-        
-        data_rows.append(row_data)
-
-    # 3. Création du DataFrame et du CSV
-    df_export = pd.DataFrame(data_rows)
-    df_export = df_export.reindex(columns=header) # Assure l'ordre des colonnes
-    
-    csv_buffer = BytesIO()
-    # Utilisation de l'encodage 'utf-8-sig' pour un support optimal des accents
-    df_export.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
-    csv_buffer.seek(0)
-    return csv_buffer.getvalue()
-
+            if isinstance(val, list) and val and hasattr(val[0], 'name'):
+                final_val = f"[Pièces jointes] {len(val)} fichiers: " + ", ".join([f.name for f in val])
+            elif hasattr(val, 'name'):
+                final_val = f"[Pièce jointe] {val.name}"
+            else:
+                final_val = str(val)
+            
+            rows.append({
+                "ID Formulaire": submission_id,
+                "Date Début": start_time_str,
+                "Date Fin": end_time_str,
+                "Projet": project_name,
+                "Phase": phase_name,
+                "ID": q_id,
+                "Question": q_text,
+                "Réponse": final_val
+            })
+            
+    df_export = pd.DataFrame(rows)
+    return df_export.to_csv(index=False, sep=';', encoding='utf-8-sig')
 
 def create_zip_export(collected_data):
-    """Crée un buffer ZIP contenant toutes les images soumises."""
-    zip_buffer = BytesIO()
+    # ... code inchangé ...
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        files_added = 0
+        for phase in collected_data:
+            phase_name_clean = str(phase['phase_name']).replace("/", "_").replace(" ", "_")
+            for q_id, answer in phase['answers'].items():
+                if isinstance(answer, list) and answer and hasattr(answer[0], 'read'):
+                    for idx, file_obj in enumerate(answer):
+                        try:
+                            file_obj.seek(0)
+                            file_content = file_obj.read()
+                            if file_content:
+                                original_name = file_obj.name.split('/')[-1].split('\\')[-1]
+                                filename = f"{phase_name_clean}_Q{q_id}_{idx+1}_{original_name}"
+                                zip_file.writestr(filename, file_content)
+                                files_added += 1
+                            file_obj.seek(0)
+                        except Exception as e:
+                            pass 
+                            
+        info_txt = f"Export généré le {datetime.now()}\nNombre de fichiers : {files_added}"
+        zip_file.writestr("info.txt", info_txt)
     
-    # Compteur pour les noms de fichiers en double
-    filename_counter = {}
-    
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-        for phase_entry in collected_data:
-            phase_name = phase_entry['phase_name']
-            answers = phase_entry['answers']
-            
-            for q_id, answer in answers.items():
-                if isinstance(answer, dict) and 'b64_data' in answer:
-                    filename = answer.get('filename', f"photo_{q_id}.jpg")
-                    b64_data = answer['b64_data']
-                    
-                    try:
-                        image_data = base64.b64decode(b64_data)
-                        
-                        # Gestion des noms de fichiers en double
-                        original_name, ext = filename.rsplit('.', 1) if '.' in filename else (filename, 'dat')
-                        
-                        if original_name not in filename_counter:
-                            filename_counter[original_name] = 0
-                            final_filename = filename
-                        else:
-                            filename_counter[original_name] += 1
-                            final_filename = f"{original_name}_{filename_counter[original_name]}.{ext}"
-                        
-                        # Chemin d'accès dans le ZIP (Phase/Nom du fichier)
-                        zip_path = f"{phase_name}/{final_filename}"
-                        
-                        # Écriture dans le ZIP
-                        zf.writestr(zip_path, image_data)
-                        
-                    except Exception as e:
-                        st.warning(f"Impossible de décoder/zipper la photo pour QID {q_id} : {e}")
-
     zip_buffer.seek(0)
     return zip_buffer
 
+def define_custom_styles(doc):
+    # ... code inchangé ...
+    # Style de titre principal
+    try: title_style = doc.styles.add_style('Report Title', WD_STYLE_TYPE.PARAGRAPH)
+    except: title_style = doc.styles['Report Title']
+    title_style.base_style = doc.styles['Heading 1']
+    title_font = title_style.font
+    title_font.name = 'Arial'
+    title_font.size = Pt(20)
+    title_font.bold = True
+    title_font.color.rgb = RGBColor(0x01, 0x38, 0x2D)
+    title_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title_style.paragraph_format.space_after = Pt(20)
 
-def create_word_report(collected_data, df_struct, project_data, form_start_time):
-    """Crée un buffer DOCX pour le rapport final."""
-    document = Document()
+    # Style de sous-titre de section
+    try: subtitle_style = doc.styles.add_style('Report Subtitle', WD_STYLE_TYPE.PARAGRAPH)
+    except: subtitle_style = doc.styles['Report Subtitle']
+    subtitle_style.base_style = doc.styles['Heading 2']
+    subtitle_font = subtitle_style.font
+    subtitle_font.name = 'Arial'
+    subtitle_font.size = Pt(14)
+    subtitle_font.bold = True
+    subtitle_font.color.rgb = RGBColor(0x00, 0x56, 0x47)
+    subtitle_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    subtitle_style.paragraph_format.space_after = Pt(10)
+
+    # Style de texte normal
+    try: text_style = doc.styles.add_style('Report Text', WD_STYLE_TYPE.PARAGRAPH)
+    except: text_style = doc.styles['Report Text']
+    text_style.base_style = doc.styles['Normal']
+    text_font = text_style.font
+    text_font.name = 'Calibri'
+    text_font.size = Pt(11)
+    text_font.color.rgb = RGBColor(0x00, 0x00, 0x00)
+    text_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    text_style.paragraph_format.space_after = Pt(5)
+
+    doc.styles['Normal'].font.name = 'Calibri'
+    doc.styles['Normal'].font.size = Pt(11)
+
+def create_word_report(collected_data, df_struct, project_data, start_time):
+    # ... code inchangé ...
+    doc = Document()
+    define_custom_styles(doc)
     
-    # Styles de base
-    style = document.styles['Normal']
-    font = style.font
-    font.name = 'Calibri'
-    font.size = Pt(11)
-
-    # --- EN-TÊTE ---
-    document.add_heading(f"Rapport d'Audit - {project_data.get('Intitulé', 'Projet Inconnu')}", level=1)
-    p = document.add_paragraph()
-    p.add_run(f"Date de l'audit : {datetime.now().strftime('%d/%m/%Y à %H:%M')}\n").bold = True
-    p.add_run(f"Début du formulaire : {form_start_time.strftime('%d/%m/%Y %H:%M')}")
-    document.add_page_break()
-
-    # --- DÉTAILS DU PROJET ---
-    document.add_heading("1. Détails du Projet", level=2)
+    # --- Page de garde/Titre ---
+    doc.add_paragraph('Rapport d\'Audit Chantier', style='Report Title')
+    doc.add_paragraph('Informations du Projet', style='Report Subtitle')
     
+    # Tableau d'informations de base
+    project_table = doc.add_table(rows=3, cols=2)
+    project_table.style = 'Light Grid Accent 1'
+    project_table.rows[0].cells[0].text = 'Intitulé'
+    project_table.rows[0].cells[1].text = str(project_data.get('Intitulé', 'N/A'))
+    
+    start_time_str = start_time.strftime('%d/%m/%Y %H:%M') if start_time else datetime.now().strftime('%d/%m/%Y %H:%M')
+    project_table.rows[1].cells[0].text = 'Date de début'
+    project_table.rows[1].cells[1].text = start_time_str
+    project_table.rows[2].cells[0].text = 'Date de fin'
+    project_table.rows[2].cells[1].text = datetime.now().strftime('%d/%m/%Y %H:%M')
+    
+    for row in project_table.rows:
+        for cell in row.cells:
+            for paragraph in cell.paragraphs:
+                paragraph.style = 'Report Text'
+    doc.add_paragraph()
+    
+    # Détails du projet (Bornes)
+    doc.add_paragraph('Détails du Projet', style='Report Subtitle')
     for group in DISPLAY_GROUPS:
-        table = document.add_table(rows=1, cols=3)
-        table.style = 'Table Grid'
-        
-        # Entête de la table (simple pour les groupes)
-        hdr_cells = table.rows[0].cells
-        hdr_cells[0].text = 'Champ'
-        hdr_cells[1].text = 'Valeur'
-        hdr_cells[2].text = ''
-
         for field_key in group:
             renamed_key = PROJECT_RENAME_MAP.get(field_key, field_key)
             value = project_data.get(field_key, 'N/A')
-            
-            row_cells = table.add_row().cells
-            row_cells[0].text = renamed_key
-            row_cells[1].text = str(value)
-
-    # --- RÉSULTATS DES PHASES ---
-    document.add_page_break()
-    document.add_heading("2. Résultats de l'Audit", level=2)
+            p = doc.add_paragraph(style='Report Text')
+            p.add_run(f'{renamed_key}: ').bold = True
+            p.add_run(str(value))
     
-    # Mapping des ID aux questions
-    question_map = {row['id']: row for _, row in df_struct.iterrows()}
+    doc.add_page_break()
     
-    for phase_entry in collected_data:
-        phase_name = phase_entry['phase_name']
-        answers = phase_entry['answers']
+    # --- Contenu par Phase ---
+    for phase_idx, phase in enumerate(collected_data):
+        phase_name = phase['phase_name']
+        doc.add_paragraph(f'Phase: {phase_name}', style='Report Subtitle')
         
-        # Titre de la Phase
-        document.add_heading(f"Phase : {phase_name}", level=3)
+        for q_id, answer in phase['answers'].items():
+            # Récupération du texte de la question
+            if int(q_id) == COMMENT_ID:
+                q_text = "Commentaire explicatif de l'écart photo par rapport au nombre attendu"
+            else:
+                if not df_struct.empty:
+                    q_row = df_struct[df_struct['id'] == int(q_id)]
+                    q_text = q_row.iloc[0]['question'] if not q_row.empty else f"Question ID {q_id}"
+                else:
+                    q_text = f"Question ID {q_id}"
+            
+            # 1. Traitement des réponses de type PHOTO
+            is_photo_answer = False
+            if isinstance(answer, list) and answer and hasattr(answer[0], 'read'):
+                is_photo_answer = True
+            elif hasattr(answer, 'read'):
+                is_photo_answer = True
+                
+            if is_photo_answer:
+                doc.add_paragraph(f'Q{q_id}: {q_text}', style='Report Subtitle')
+                if isinstance(answer, list):
+                     doc.add_paragraph(f'Nombre de photos: {len(answer)}', style='Report Text')
+                     for idx, file_obj in enumerate(answer):
+                         try:
+                             file_obj.seek(0)
+                             image_data = file_obj.read()
+                             if image_data:
+                                 image_stream = io.BytesIO(image_data)
+                                 doc.add_picture(image_stream, width=Inches(5)) 
+                                 caption = doc.add_paragraph(f'Photo {idx+1}: {file_obj.name}', style='Report Text')
+                                 caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                 caption.runs[0].font.size = Pt(9)
+                                 caption.runs[0].font.italic = True
+                                 file_obj.seek(0)
+                         except Exception as e:
+                             doc.add_paragraph(f'[Erreur photo {idx+1}: {e}]', style='Report Text')
+                doc.add_paragraph()
+
+            # 2. Traitement des autres types de réponses (texte, nombre, select)
+            else:
+                table = doc.add_table(rows=1, cols=2)
+                table.style = 'Light Grid Accent 1'
+                q_cell = table.cell(0, 0)
+                q_cell.text = f'Q{q_id}: {q_text}'
+                q_cell.width = Inches(5.0)
+                a_cell = table.cell(0, 1)
+                a_cell.text = str(answer)
+                a_cell.width = Inches(1.0)
+                for cell in table.rows[0].cells:
+                    cell.paragraphs[0].style = 'Report Text'
+                    cell.paragraphs[0].paragraph_format.left_indent = None 
+                    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER 
+                q_cell.paragraphs[0].runs[0].bold = True
+                doc.add_paragraph()
         
-        for q_id, answer in answers.items():
-            try:
-                q_id_int = int(q_id)
-            except ValueError:
-                continue
-
-            # Ne pas afficher les IDs non trouvés ou le COMMENT_ID dans le listing principal
-            if q_id_int not in question_map or q_id_int == COMMENT_ID: continue
-            
-            q_row = question_map[q_id_int]
-            q_text = q_row.get('question', f"Question ID {q_id_int}")
-            q_type = str(q_row.get('type', 'text')).strip().lower()
-            
-            # Affichage de la question
-            p_q = document.add_paragraph()
-            p_q.add_run(f"Q{q_id_int}: {q_text}").bold = True
-
-            if q_type == 'photo' and isinstance(answer, dict) and 'b64_data' in answer:
-                # --- Affichage des Photos ---
-                filename = answer.get('filename', 'Image')
-                document.add_paragraph(f"Réponse : {filename}").italic = True
-                
-                try:
-                    # Décodage et insertion de l'image
-                    image_data = base64.b64decode(answer['b64_data'])
-                    image_stream = BytesIO(image_data)
-                    
-                    # Le bloc d'image doit être centré
-                    p_img = document.add_paragraph()
-                    p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    
-                    # On réduit la taille pour le rapport A4
-                    run_img = p_img.add_run()
-                    run_img.add_picture(image_stream, width=Inches(3.5)) 
-                    
-                except Exception as e:
-                    document.add_paragraph(f"[Erreur d'affichage de l'image: {e}]")
-                    
-                # Vérifie si la justification est présente pour cette photo (si elle est manquante)
-                comment_text = answers.get(COMMENT_ID)
-                if comment_text and q_row.get('mandatory', 'NON').upper() == 'NON' and not answer.get('b64_data'):
-                     p_com = document.add_paragraph()
-                     p_com.add_run("Justification de l'absence: ").bold = True
-                     p_com.add_run(str(comment_text)).italic = True
-
-            elif answer is not None and str(answer).strip():
-                # --- Affichage des autres réponses ---
-                document.add_paragraph(f"Réponse : {str(answer)}")
-                
-        # Affichage du commentaire général (s'il existe et n'a pas été traité)
-        comment_final = answers.get(COMMENT_ID)
-        if comment_final and str(comment_final).strip():
-            document.add_paragraph("---")
-            p_com = document.add_paragraph()
-            p_com.add_run("Commentaire / Justification générale de l'écart: ").bold = True
-            p_com.add_run(str(comment_final))
-
-        document.add_page_break()
-
-    # Sauvegarde du document dans un buffer
-    word_buffer = BytesIO()
-    document.save(word_buffer)
+        if phase_idx < len(collected_data) - 1:
+            doc.add_page_break()
+    
+    word_buffer = io.BytesIO()
+    doc.save(word_buffer)
     word_buffer.seek(0)
     return word_buffer
+
+# --- COMPOSANT UI (rendu de la question) ---
+# utils.py - Fonction render_question (complète)
+
+# ... (Le reste du code de utils.py reste inchangé) ...
+
+# --- COMPOSANT UI (rendu de la question) ---
+# utils.py - Fonction render_question (complète et corrigée)
+# ... (N'oubliez pas les imports et le reste de votre fichier utils.py) ...
+
+# --- COMPOSANT UI (rendu de la question) ---
+def render_question(row, answers, phase_name, key_suffix, loop_index, project_data):
+    """
+    Rendu d'une question dans Streamlit. Modifie le dictionnaire 'answers' en place.
+    
+    Toutes les questions de type 'number' sont désormais traitées comme des entiers.
+    """
+    q_id = int(row.get('id', 0))
+    is_dynamic_comment = q_id == COMMENT_ID
+    
+    if is_dynamic_comment:
+        q_text = COMMENT_QUESTION
+        q_type = 'text' 
+        q_desc = "Ce champ est obligatoire si le nombre de photos n'est pas conforme."
+        q_mandatory = True 
+        q_options = []
+    else:
+        q_text = row['question']
+        # Ligne cruciale : on nettoie et met en minuscule pour une comparaison robuste
+        q_type = str(row['type']).strip().lower() 
+        q_desc = row['Description']
+        q_mandatory = str(row['obligatoire']).lower() == 'oui'
+        q_options = str(row['options']).split(',') if row['options'] else []
+        
+    q_text = str(q_text).strip()
+    q_desc = str(q_desc).strip()
+    label_html = f"<strong>{q_id}. {q_text}</strong>" + (' <span class="mandatory">*</span>' if q_mandatory else "")
+    widget_key = f"q_{q_id}_{phase_name}_{key_suffix}_{loop_index}"
+    current_val = answers.get(q_id)
+    val = current_val
+
+    st.markdown(f'<div class="question-card"><div>{label_html}</div>', unsafe_allow_html=True)
+    if q_desc: st.markdown(f'<div class="description">⚠️ {q_desc}</div>', unsafe_allow_html=True)
+    
+    # Étape de débogage temporaire : 
+    # st.write(f"DEBUG: Q_ID={q_id}, Q_TYPE='{q_type}'") 
+
+    if q_type == 'text':
+        default_val = current_val if current_val else ""
+        if is_dynamic_comment:
+             val = st.text_area("Justification de l'écart", value=default_val, key=widget_key, label_visibility="collapsed")
+        else:
+             val = st.text_input("Réponse", value=default_val, key=widget_key, label_visibility="collapsed")
+
+    elif q_type == 'select':
+        clean_opts = [opt.strip() for opt in q_options]
+        if "" not in clean_opts: clean_opts.insert(0, "")
+        idx = clean_opts.index(current_val) if current_val in clean_opts else 0
+        val = st.selectbox("Sélection", clean_opts, index=idx, key=widget_key, label_visibility="collapsed")
+    
+    # --- LOGIQUE AUTOMATIQUE POUR NUMBER (FORCÉ EN ENTIER) ---
+    elif q_type == 'number': # Cette condition doit être TRUE
+        
+        label = "Nombre (Entier)"
+        # On s'assure que la valeur par défaut est un entier (0 si invalide)
+        try:
+            default_val = int(float(current_val)) if current_val is not None and str(current_val).replace('.', '', 1).isdigit() else 0
+        except:
+            default_val = 0
+            
+        val = st.number_input(
+            label, 
+            value=default_val, 
+            step=1,             # <-- LIGNE CRUCIALE : Force le pas de 1
+            format="%d",         # <-- LIGNE CRUCIALE : Force l'affichage entier
+            key=widget_key, 
+            label_visibility="collapsed"
+        )
+    # --------------------------------------------------------
+    
+    elif q_type == 'photo':
+        expected, details = get_expected_photo_count(phase_name.strip(), project_data)
+        if expected is not None and expected > 0:
+            st.info(f"📸 **Photos :** Il est attendu **{expected}** photos pour cette section (Base calculée : {details}).")
+            st.divider()
+        
+        file_uploader_default = current_val if isinstance(current_val, list) else []
+
+        val = st.file_uploader("Images", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True, key=widget_key, label_visibility="collapsed")
+        
+        if val:
+            file_names = ", ".join([f.name for f in val])
+            st.success(f"Nombre d'images chargées : {len(val)} ({file_names})")
+        elif file_uploader_default and isinstance(file_uploader_default, list):
+            val = file_uploader_default
+            names = ", ".join([getattr(f, 'name', 'Fichier') for f in val])
+            st.info(f"Fichiers conservés : {len(val)} ({names})")
+        
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Mise à jour des réponses dans le dictionnaire 'answers'
+    if val is not None and (not is_dynamic_comment or str(val).strip() != ""): 
+        if q_type == 'number':
+             answers[q_id] = int(val) # <-- LIGNE CRUCIALE : Force le stockage en entier
+        else:
+            answers[q_id] = val 
+    elif current_val is not None and not is_dynamic_comment: 
+        answers[q_id] = current_val 
+    elif is_dynamic_comment and (val is None or str(val).strip() == ""):
+        if q_id in answers: del answers[q_id]
