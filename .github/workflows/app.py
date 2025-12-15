@@ -312,29 +312,44 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                     st.session_state['show_comment_on_error'] = False
                     st.session_state['last_validation_errors'] = None # Réinitialisation
                     st.rerun()
+# app.py (dans le bloc elif st.session_state['step'] == 'FILL_PHASE':, sous 'with c2:')
+
             with c2:
                 if st.button("💾 Valider la phase"):
                     st.session_state['show_comment_on_error'] = False
                     st.session_state['last_validation_errors'] = None # Réinitialisation à la tentative de validation
                     
-                    is_valid, errors = utils.validate_section(df, current_phase, st.session_state['current_phase_temp'], st.session_state['collected_data'], st.session_state['project_data'])
+                    # --- NOUVEAU: Utiliser une variable locale pour les DataFrames 
+                    df_struct = st.session_state.get('df_struct')
+                    if df_struct is None:
+                        st.error("Structure du formulaire manquante. Veuillez recharger le projet.")
+                        # Ne pas appeler rerun ici, sinon cela boucle sur l'erreur
+                        # st.rerun() 
+                        return # Arrête l'exécution de la validation
+
+                    is_valid, errors = utils.validate_section(
+                        df_struct, # <-- Utiliser df_struct local et vérifié
+                        current_phase, 
+                        st.session_state['current_phase_temp'], 
+                        st.session_state['collected_data'], 
+                        st.session_state['project_data']
+                    )
                     
                     if is_valid:
+                        # ... (Succès, pas de changement)
                         new_entry = {"phase_name": current_phase, "answers": st.session_state['current_phase_temp'].copy()}
                         st.session_state['collected_data'].append(new_entry)
                         st.success("Phase validée et enregistrée !")
                         st.session_state['step'] = 'LOOP_DECISION'
-                        st.session_state['last_validation_errors'] = None # Réinitialisation en cas de succès
+                        st.session_state['last_validation_errors'] = None
                         st.rerun()
                     else:
-                        # Vérifie si l'erreur est liée au manque de justification pour les photos
+                        # ... (Gestion des erreurs, pas de changement ici)
                         is_photo_error = any(f"Commentaire (ID {utils.COMMENT_ID})" in e for e in errors)
                         if is_photo_error: st.session_state['show_comment_on_error'] = True
                         
-                        # Stockage de l'erreur au lieu de l'affichage direct + suppression du rerun
                         html_errors = '<br>'.join([f"- {e}" for e in errors])
                         st.session_state['last_validation_errors'] = html_errors
-                        # st.rerun() est remplacé par experimental_rerun pour rafraichir l'affichage
                         st.experimental_rerun() 
             st.markdown('</div>', unsafe_allow_html=True)
 
