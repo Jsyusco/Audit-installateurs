@@ -102,7 +102,7 @@ def load_form_structure_from_firestore():
         df['options'] = df['options'].fillna('')
         df['Description'] = df['Description'].fillna('')
         df['Condition value'] = df['Condition value'].fillna('')
-        df['Condition on'] = df['Condition on'].apply(lambda x: int(x) if pd.notna(x) and str(x).isdigit() else 0)
+        df['Condition on'] = pd.to_numeric(df['Condition on'], errors='coerce').fillna(0).astype(int)
         
         for col in df.select_dtypes(include=['object']).columns:
             df[col] = df[col].astype(str).str.strip()
