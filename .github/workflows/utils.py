@@ -347,14 +347,32 @@ def define_custom_styles(doc):
     subtitle_font.color.rgb = RGBColor(0x00, 0x56, 0x47)
 
 def create_word_report(collected_data, df_struct, project_data, start_time):
+    # ... (inchangé)
     doc = Document()
     define_custom_styles(doc)
+    
+    # --- Page de garde/Titre ---
     doc.add_paragraph('Rapport d\'Audit Chantier', style='Report Title')
-    # ... (Le reste de la fonction de création Word est identique, centrée sur le contenu)
-    word_buffer = io.BytesIO()
-    doc.save(word_buffer)
-    word_buffer.seek(0)
-    return word_buffer
+    doc.add_paragraph('Informations du Projet', style='Report Subtitle')
+    
+    # Tableau d'informations de base
+    project_table = doc.add_table(rows=3, cols=2)
+    project_table.style = 'Light Grid Accent 1'
+    project_table.rows[0].cells[0].text = 'Intitulé'
+    project_table.rows[0].cells[1].text = str(project_data.get('Intitulé', 'N/A'))
+    
+    start_time_str = start_time.strftime('%d/%m/%Y %H:%M') if start_time else datetime.now().strftime('%d/%m/%Y %H:%M')
+    project_table.rows[1].cells[0].text = 'Date de début'
+    project_table.rows[1].cells[1].text = start_time_str
+    project_table.rows[2].cells[0].text = 'Date de fin'
+    project_table.rows[2].cells[1].text = datetime.now().strftime('%d/%m/%Y %H:%M')
+    
+    for row in project_table.rows:
+        for cell in row.cells:
+            for paragraph in cell.paragraphs:
+                paragraph.style = 'Report Text'
+    doc.add_paragraph()
+    
 
 # --- COMPOSANT UI (Rendu de la question) ---
 def render_question(row, answers, phase_name, key_suffix, loop_index, project_data):
