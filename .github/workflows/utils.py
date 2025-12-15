@@ -346,32 +346,130 @@ def define_custom_styles(doc):
     subtitle_font.bold = True
     subtitle_font.color.rgb = RGBColor(0x00, 0x56, 0x47)
 
-def create_word_report(collected_data, df_struct, project_data, start_time):
-    # ... (inchangé)
+def create_word_report(collected_data, df_struct, project_data):
+    """
+    Crée un rapport Word avec toutes les questions et les photos
+    """
     doc = Document()
-    define_custom_styles(doc)
     
-    # --- Page de garde/Titre ---
-    doc.add_paragraph('Rapport d\'Audit Chantier', style='Report Title')
-    doc.add_paragraph('Informations du Projet', style='Report Subtitle')
+    # Style du document
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = 'Calibri'
+    font.size = Pt(11)
     
-    # Tableau d'informations de base
+    # En-tête
+    header = doc.add_heading('Rapport d\'Audit Chantier', 0)
+    header.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Informations du projet
+    doc.add_heading('Informations du Projet', level=1)
     project_table = doc.add_table(rows=3, cols=2)
     project_table.style = 'Light Grid Accent 1'
+    
     project_table.rows[0].cells[0].text = 'Intitulé'
     project_table.rows[0].cells[1].text = str(project_data.get('Intitulé', 'N/A'))
-    
-    start_time_str = start_time.strftime('%d/%m/%Y %H:%M') if start_time else datetime.now().strftime('%d/%m/%Y %H:%M')
     project_table.rows[1].cells[0].text = 'Date de début'
-    project_table.rows[1].cells[1].text = start_time_str
+    project_table.rows[1].cells[1].text = st.session_state.get('form_start_time', datetime.now()).strftime('%d/%m/%Y %H:%M')
     project_table.rows[2].cells[0].text = 'Date de fin'
     project_table.rows[2].cells[1].text = datetime.now().strftime('%d/%m/%Y %H:%M')
     
-    for row in project_table.rows:
-        for cell in row.cells:
-            for paragraph in cell.paragraphs:
-                paragraph.style = 'Report Text'
     doc.add_paragraph()
+    
+    # Détails du projet
+    doc.add_heading('Détails du Projet', level=2)
+    for group in DISPLAY_GROUPS:
+        for field_key in group:
+            renamed_key = PROJECT_RENAME_MAP.get(field_key, field_key)
+            value = project_data.get(field_key, 'N/A')
+            p = doc.add_paragraph()
+            p.add_run(f'{renamed_key}: ').bold = True
+            p.add_run(str(value))
+    
+    doc.add_page_break()
+    
+    # Parcourir toutes les phases
+    for phase_idx, phase in enumerate(collected_data):
+        phase_name = phase['phase_name']
+        doc.add_heading(f'Phase: {phase_name}', level=1)
+        
+        # Parcourir toutes les questions de cette phase
+        for q_id, answer in phase['answers'].items():
+            # Récupérer le texte de la question
+            if int(q_id) == 100:
+                q_text = "Commentaire Écart Photo"
+            else:
+                q_row = df_struct[df_struct['id'] == int(q_id)]
+                q_text = q_row.iloc[0]['question'] if not q_row.empty else f"Question ID {q_id}"
+            
+            # Ajouter la question
+            question_p = doc.add_paragraph()
+            question_p.add_run(f'Q{q_id}: {q_text}').bold = True
+            
+            # Gérer la réponse selon son type
+            if isinstance(answer, list) and answer and hasattr(answer[0], 'read'):
+                # Liste de photos
+                doc.add_paragraph(f'Nombre de photos: {len(answer)}')
+                
+                for idx, file_obj in enumerate(answer):
+                    try:
+                        file_obj.seek(0)
+                        image_data = file_obj.read()
+                        
+                        if image_data:
+                            # Créer un objet BytesIO pour l'image
+                            image_stream = io.BytesIO(image_data)
+                            
+                            # Ajouter l'image au document (largeur max 6 inches)
+                            doc.add_picture(image_stream, width=Inches(5))
+                            
+                            # Ajouter la légende
+                            caption = doc.add_paragraph(f'Photo {idx+1}: {file_obj.name}')
+                            caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            caption_format = caption.runs[0].font
+                            caption_format.size = Pt(9)
+                            caption_format.italic = True
+                        
+                        file_obj.seek(0)
+                    except Exception as e:
+                        doc.add_paragraph(f'[Erreur lors du chargement de la photo {idx+1}: {e}]')
+            
+            elif hasattr(answer, 'read'):
+                # Photo unique
+                try:
+                    answer.seek(0)
+                    image_data = answer.read()
+                    
+                    if image_data:
+                        image_stream = io.BytesIO(image_data)
+                        doc.add_picture(image_stream, width=Inches(5))
+                        caption = doc.add_paragraph(f'Photo: {answer.name}')
+                        caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        caption_format = caption.runs[0].font
+                        caption_format.size = Pt(9)
+                        caption_format.italic = True
+                    
+                    answer.seek(0)
+                except Exception as e:
+                    doc.add_paragraph(f'[Erreur lors du chargement de la photo: {e}]')
+            
+            else:
+                # Réponse textuelle
+                answer_p = doc.add_paragraph(str(answer))
+                answer_p.paragraph_format.left_indent = Inches(0.5)
+            
+            doc.add_paragraph()  # Espace entre les questions
+        
+        # Saut de page entre les phases (sauf pour la dernière)
+        if phase_idx < len(collected_data) - 1:
+            doc.add_page_break()
+    
+    # Sauvegarder dans un buffer
+    word_buffer = io.BytesIO()
+    doc.save(word_buffer)
+    word_buffer.seek(0)
+    
+    return word_buffer
     
 
 # --- COMPOSANT UI (Rendu de la question) ---
