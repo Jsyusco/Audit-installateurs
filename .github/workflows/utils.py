@@ -170,12 +170,12 @@ def get_expected_photo_count(section_name, project_data):
 # utils.py
 # ... (autres fonctions) ...
 
+# utils.py
 def _evaluate_simple_term(term_string, combined_answers):
     """
     Évalue une sous-condition simple (ex: "10 = Oui" ou "9 <> Non")
     et retourne True ou False.
     """
-    # Nettoyage de la chaîne de comparaison pour gérer les espaces et les guillemets
     term = term_string.strip().upper()
     
     # Déterminer l'opérateur de comparaison
@@ -187,15 +187,17 @@ def _evaluate_simple_term(term_string, combined_answers):
         op_python = ' == '
     else:
         # Cas non supporté ou mal formaté (on considère que la condition est fausse)
+        # st.error(f"DEBUG: Terme non supporté ou mal formaté: '{term_string}'") # Décommenter pour debug
         return False
         
     try:
+        # C'est cette ligne qui peut potentiellement échouer si le split ne retourne pas 2 éléments
         question_num_str, expected_value_str = term_string.split(op_raw.strip(), 1)
         
         q_num = int(question_num_str.strip())
         expected_value = expected_value_str.strip().strip('"').strip("'")
         
-        # Récupérer la réponse réelle (mise en string et minuscule pour comparaison)
+        # Récupérer la réponse réelle
         user_answer = combined_answers.get(q_num)
         
         # Si la question n'a pas été répondue, le terme est Faux
@@ -204,12 +206,7 @@ def _evaluate_simple_term(term_string, combined_answers):
 
         # On convertit TOUJOURS la réponse utilisateur en chaîne de caractères pour la comparaison
         actual_answer_str = str(user_answer).strip().lower()
-        
-        # La valeur attendue doit aussi être en minuscule pour la comparaison (robustesse)
         expected_value_lower = expected_value.lower()
-        
-        # Note : On fait la comparaison manuellement au lieu d'utiliser eval pour cette sous-condition 
-        # afin de mieux gérer les chaînes de caractères et la robustesse de la DB.
         
         if op_python == ' == ':
             return actual_answer_str == expected_value_lower
@@ -219,9 +216,9 @@ def _evaluate_simple_term(term_string, combined_answers):
         return False # Fallback de sécurité
 
     except Exception as e:
-        # print(f"DEBUG Erreur d'évaluation du terme '{term_string}' : {e}")
-        return False # En cas d'erreur de parsing, le terme est Faux
-        
+        # En cas d'erreur de parsing (ex: question_num_str n'est pas un int), le terme est Faux
+        # st.error(f"DEBUG: Erreur de parsing dans _evaluate_simple_term pour '{term_string}': {e}") # Décommenter pour debug
+        return False
         
 def check_condition(row, current_answers, collected_data):
     """
