@@ -155,7 +155,7 @@ elif st.session_state['step'] == 'IDENTIFICATION':
         df_struct = st.session_state.get('df_struct')
         if df_struct is None:
             st.error("Structure du formulaire manquante. Veuillez recharger le projet.")
-            st.experimental_rerun()
+            st.rerun() # <--- CORRECTION ICI
         # --------------------------------------------------------------------
         
         # NOTE: On n'utilise pas le try/except ici pour ne pas masquer d'erreur dans l'étape initiale
@@ -177,7 +177,7 @@ elif st.session_state['step'] == 'IDENTIFICATION':
 
             html_errors = '<br>'.join([f"- {e}" for e in cleaned_errors])
             st.session_state['last_validation_errors'] = html_errors
-            st.experimental_rerun() 
+            st.rerun() # <--- CORRECTION ICI
             # -----------------------------------------
 
 # 4. BOUCLE PHASES
@@ -322,8 +322,8 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                     df_struct = st.session_state.get('df_struct')
                     if df_struct is None:
                         st.error("Structure du formulaire manquante. Veuillez recharger le projet.")
-                        st.experimental_rerun()
-                        st.stop() # <-- Utiliser st.stop() pour arrêter l'exécution du script principal
+                        st.rerun() # <--- CORRECTION ICI
+                        st.stop()
                     # -------------------------------------------------------------
                     
                     # --- NOUVEAU BLOC TRY/EXCEPT POUR ISOLER L'ATTRIBUTERROR ---
@@ -340,8 +340,9 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                         st.session_state['last_validation_errors'] = f"Erreur critique dans la validation (AttributeError) : {e}"
                         st.error(f"Erreur interne : {e}. Veuillez contacter le support. (Code: ATTRIB-VALID)")
                         st.session_state['show_comment_on_error'] = True 
-                        st.experimental_rerun()
+                        st.rerun() # <--- CORRECTION IMPORTANTE ICI (Ligne qui plantait)
                         st.stop()
+
                     if is_valid:
                         new_entry = {"phase_name": current_phase, "answers": st.session_state['current_phase_temp'].copy()}
                         st.session_state['collected_data'].append(new_entry)
@@ -359,7 +360,7 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                         
                         html_errors = '<br>'.join([f"- {e}" for e in cleaned_errors])
                         st.session_state['last_validation_errors'] = html_errors
-                        st.experimental_rerun() 
+                        st.rerun() # <--- CORRECTION ICI
                         # -----------------------------------------
             st.markdown('</div>', unsafe_allow_html=True)
 
