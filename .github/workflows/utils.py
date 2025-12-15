@@ -554,11 +554,14 @@ def create_word_report(collected_data, df_struct, project_data, start_time):
     return word_buffer
 
 # --- COMPOSANT UI (rendu de la question) ---
+# utils.py
+
+# ... (toutes les fonctions précédentes restent inchangées)
+
+# --- COMPOSANT UI (rendu de la question) ---
 def render_question(row, answers, phase_name, key_suffix, loop_index, project_data):
     """
     Rendu d'une question dans Streamlit. Modifie le dictionnaire 'answers' en place.
-    
-    Toutes les questions de type 'number' sont désormais traitées comme des entiers.
     """
     q_id = int(row.get('id', 0))
     is_dynamic_comment = q_id == COMMENT_ID
@@ -569,17 +572,38 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
         q_desc = "Ce champ est obligatoire si le nombre de photos n'est pas conforme."
         q_mandatory = True 
         q_options = []
+        condition_display = "" # Pas de condition pour le commentaire
     else:
         q_text = row['question']
-        # Ligne cruciale : on nettoie et met en minuscule pour une comparaison robuste
         q_type = str(row['type']).strip().lower() 
         q_desc = row['Description']
         q_mandatory = str(row['obligatoire']).lower() == 'oui'
         q_options = str(row['options']).split(',') if row['options'] else []
         
+        # --- NOUVELLE LOGIQUE POUR L'AFFICHAGE DE LA CONDITION ---
+        condition_value = str(row.get('Condition value', '')).strip()
+        condition_on = int(row.get('Condition on', 0))
+        
+        condition_display = ""
+        if condition_on == 1 and condition_value:
+             # Formatte la condition pour un affichage lisible
+            condition_display = (
+                f'<span style="font-size: 0.8em; color: #a0a0a0; font-weight: normal; margin-left: 10px;">'
+                f'[Condition: {condition_value}]'
+                f'</span>'
+            )
+        # ------------------------------------------------------------
+        
     q_text = str(q_text).strip()
     q_desc = str(q_desc).strip()
-    label_html = f"<strong>{q_id}. {q_text}</strong>" + (' <span class="mandatory">*</span>' if q_mandatory else "")
+    
+    # Intégration de la condition dans le label HTML
+    label_html = (
+        f"<strong>{q_id}. {q_text}</strong>" 
+        + (' <span class="mandatory">*</span>' if q_mandatory else "")
+        + condition_display # <-- AJOUT DE L'AFFICHAGE DE LA CONDITION
+    )
+    
     widget_key = f"q_{q_id}_{phase_name}_{key_suffix}_{loop_index}"
     current_val = answers.get(q_id)
     val = current_val
@@ -587,9 +611,8 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
     st.markdown(f'<div class="question-card"><div>{label_html}</div>', unsafe_allow_html=True)
     if q_desc: st.markdown(f'<div class="description">⚠️ {q_desc}</div>', unsafe_allow_html=True)
     
-    # Étape de débogage temporaire : 
-    # st.write(f"DEBUG: Q_ID={q_id}, Q_TYPE='{q_type}'") 
-
+    # ... (Le reste du code de la fonction pour les types de champs: text, select, number, photo)
+    
     if q_type == 'text':
         default_val = current_val if current_val else ""
         if is_dynamic_comment:
@@ -603,11 +626,8 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
         idx = clean_opts.index(current_val) if current_val in clean_opts else 0
         val = st.selectbox("Sélection", clean_opts, index=idx, key=widget_key, label_visibility="collapsed")
     
-    # --- LOGIQUE AUTOMATIQUE POUR NUMBER (FORCÉ EN ENTIER) ---
-    elif q_type == 'number': # Cette condition doit être TRUE
-        
+    elif q_type == 'number':
         label = "Nombre (Entier)"
-        # On s'assure que la valeur par défaut est un entier (0 si invalide)
         try:
             default_val = int(float(current_val)) if current_val is not None and str(current_val).replace('.', '', 1).isdigit() else 0
         except:
@@ -616,12 +636,11 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
         val = st.number_input(
             label, 
             value=default_val, 
-            step=1,             # <-- LIGNE CRUCIALE : Force le pas de 1
-            format="%d",         # <-- LIGNE CRUCIALE : Force l'affichage entier
+            step=1,             
+            format="%d",         
             key=widget_key, 
             label_visibility="collapsed"
         )
-    # --------------------------------------------------------
     
     elif q_type == 'photo':
         expected, details = get_expected_photo_count(phase_name.strip(), project_data)
@@ -646,7 +665,7 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
     # Mise à jour des réponses dans le dictionnaire 'answers'
     if val is not None and (not is_dynamic_comment or str(val).strip() != ""): 
         if q_type == 'number':
-             answers[q_id] = int(val) # <-- LIGNE CRUCIALE : Force le stockage en entier
+             answers[q_id] = int(val) 
         else:
             answers[q_id] = val 
     elif current_val is not None and not is_dynamic_comment: 
