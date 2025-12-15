@@ -616,7 +616,7 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
     val = current_val
 
     # Ligne de débogage - DÉCOMMENTEZ POUR VÉRIFIER LES VALEURS LUES PAR PYTHON
-    # st.write(f"DEBUG Q{q_id}: Condition on={row.get('Condition on')}, Condition value='{row.get('Condition value')}'")
+    st.write(f"DEBUG Q{q_id}: Condition on={row.get('Condition on')}, Condition value='{row.get('Condition value')}'")
 
     st.markdown(f'<div class="question-card"><div>{label_html}</div>', unsafe_allow_html=True)
     if q_desc: st.markdown(f'<div class="description">⚠️ {q_desc}</div>', unsafe_allow_html=True)
