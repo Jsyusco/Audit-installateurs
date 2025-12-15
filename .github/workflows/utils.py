@@ -167,8 +167,67 @@ def get_expected_photo_count(section_name, project_data):
 # utils.py
 # ... (autres fonctions) ...
 
+# utils.py
+# ... (autres fonctions) ...
+
+def _evaluate_simple_term(term_string, combined_answers):
+    """
+    Évalue une sous-condition simple (ex: "10 = Oui" ou "9 <> Non")
+    et retourne True ou False.
+    """
+    # Nettoyage de la chaîne de comparaison pour gérer les espaces et les guillemets
+    term = term_string.strip().upper()
+    
+    # Déterminer l'opérateur de comparaison
+    if ' <> ' in term:
+        op_raw = ' <> '
+        op_python = ' != '
+    elif ' = ' in term:
+        op_raw = ' = '
+        op_python = ' == '
+    else:
+        # Cas non supporté ou mal formaté (on considère que la condition est fausse)
+        return False
+        
+    try:
+        question_num_str, expected_value_str = term_string.split(op_raw.strip(), 1)
+        
+        q_num = int(question_num_str.strip())
+        expected_value = expected_value_str.strip().strip('"').strip("'")
+        
+        # Récupérer la réponse réelle (mise en string et minuscule pour comparaison)
+        user_answer = combined_answers.get(q_num)
+        
+        # Si la question n'a pas été répondue, le terme est Faux
+        if user_answer is None:
+            return False
+
+        # On convertit TOUJOURS la réponse utilisateur en chaîne de caractères pour la comparaison
+        actual_answer_str = str(user_answer).strip().lower()
+        
+        # La valeur attendue doit aussi être en minuscule pour la comparaison (robustesse)
+        expected_value_lower = expected_value.lower()
+        
+        # Note : On fait la comparaison manuellement au lieu d'utiliser eval pour cette sous-condition 
+        # afin de mieux gérer les chaînes de caractères et la robustesse de la DB.
+        
+        if op_python == ' == ':
+            return actual_answer_str == expected_value_lower
+        elif op_python == ' != ':
+            return actual_answer_str != expected_value_lower
+        
+        return False # Fallback de sécurité
+
+    except Exception as e:
+        # print(f"DEBUG Erreur d'évaluation du terme '{term_string}' : {e}")
+        return False # En cas d'erreur de parsing, le terme est Faux
+        
+        
 def check_condition(row, current_answers, collected_data):
-    """Vérifie si une question doit être affichée en fonction des réponses précédentes."""
+    """
+    Vérifie si une question doit être affichée en fonction des réponses précédentes.
+    Supporte les conditions multiples avec ET et OU, ainsi que les opérateurs = et <>.
+    """
     
     # 1. Vérification si la question est conditionnelle (Condition on == 1)
     try:
@@ -184,124 +243,57 @@ def check_condition(row, current_answers, collected_data):
              
     combined_answers = {**all_past_answers, **current_answers}
     
-    # 3. Parsing de la condition (ex: "10 = "Oui"")
+    # 3. Parsing de la condition (ex: "10 = Oui ET 9 <> Non")
     condition_str = str(row.get('Condition value', '')).strip()
     
     # --- NETTOYAGE AGRESSIF DE LA CHAÎNE DE CONDITION ---
-    # Gère les cas où la DB enregistre '"10 = "Oui""' ou ' 10 = Oui '
-    
-    # Boucle pour enlever tous les guillemets ou apostrophes qui entourent la chaîne
+    # Enlève les guillemets/apostrophes qui pourraient entourer la chaîne entière
     while condition_str.startswith('"') and condition_str.endswith('"'):
         condition_str = condition_str[1:-1].strip()
     while condition_str.startswith("'") and condition_str.endswith("'"):
         condition_str = condition_str[1:-1].strip()
         
-    if not condition_str or "=" not in condition_str: 
+    if not condition_str or ("=" not in condition_str and "<>" not in condition_str): 
         return True
 
+    # 4. Remplacement des opérateurs logiques pour le parsing
+    
+    # On met tout en majuscule pour la recherche
+    temp_string = condition_str.upper() 
+    
+    # Remplacer les opérateurs logiques par des délimiteurs
+    temp_string = temp_string.replace(' ET ', '|||AND|||')
+    temp_string = temp_string.replace(' OU ', '|||OR|||')
+    
+    # Séparation par les délimiteurs pour obtenir les termes simples et les opérateurs
+    parts = temp_string.split('|||')
+    
+    # 5. Construction de l'expression booléenne finale
+    final_expression_eval = ""
+    
+    for part in parts:
+        part = part.strip()
+        
+        if part == 'AND':
+            final_expression_eval += ' and '
+        elif part == 'OR':
+            final_expression_eval += ' or '
+        elif part:
+            # Évaluation du terme simple (ex: "10 = Oui")
+            term_result = _evaluate_simple_term(part, combined_answers)
+            # Ajout du résultat booléen (True ou False) à l'expression à évaluer
+            final_expression_eval += str(term_result)
+
+    # 6. Évaluation de l'expression complète
+    if not final_expression_eval.strip():
+        return False
+        
     try:
-        # 3a. Séparation de l'ID et de la valeur
-        target_id_str, expected_value_raw = condition_str.split('=', 1)
-        
-        # 3b. Nettoyage et conversion de l'ID cible
-        # On enlève les quotes restantes au cas où l'ID était cité dans la chaîne
-        target_id = int(target_id_str.strip().strip('"').strip("'"))
-        
-        # 3c. Nettoyage de la valeur attendue
-        # On enlève les quotes, les espaces et on met en minuscule pour une comparaison robuste
-        expected_value = expected_value_raw.strip().strip('"').strip("'").lower() 
-        
-        # 4. Comparaison des réponses
-        user_answer = combined_answers.get(target_id)
-        
-        if user_answer is not None:
-            # On convertit TOUJOURS la réponse utilisateur en chaîne de caractères, puis en minuscule.
-            actual_answer_str = str(user_answer).lower()
-            
-            return actual_answer_str == expected_value
-        else:
-            # La question cible n'a pas encore été répondue
-            return False
-            
-    except Exception: 
-        # S'il y a une erreur de formatage non prévue, on affiche la question par sécurité
-        return True
-
-def validate_section(df_questions, section_name, answers, collected_data, project_data):
-    """Valide les réponses d'une section, y compris le compte de photos si applicable."""
-    missing = []
-    section_rows = df_questions[df_questions['section'] == section_name]
-    
-    comment_val = answers.get(COMMENT_ID)
-    has_justification = comment_val is not None and str(comment_val).strip() != ""
-    
-    # 1. Calcul du nombre de photos attendu
-    expected_total_base, detail_str = get_expected_photo_count(section_name.strip(), project_data)
-    expected_total = expected_total_base
-    
-    photo_question_count = sum(
-        1 for _, row in section_rows.iterrows()
-        if str(row.get('type', '')).strip().lower() == 'photo' and check_condition(row, answers, collected_data)
-    )
-    
-    if expected_total is not None and expected_total > 0:
-        expected_total = expected_total_base * photo_question_count
-        detail_str = (
-            f"{detail_str} | Questions photo visibles: {photo_question_count} "
-            f"-> Total ajusté: {expected_total}"
-        )
-
-    # 2. Compte des photos soumises
-    current_photo_count = 0
-    photo_questions_found = False
-    
-    for _, row in section_rows.iterrows():
-        q_type = str(row['type']).strip().lower()
-        if q_type == 'photo' and check_condition(row, answers, collected_data):
-            photo_questions_found = True
-            q_id = int(row['id'])
-            val = answers.get(q_id)
-            if isinstance(val, list):
-                current_photo_count += len(val)
-
-    # 3. Vérification des champs obligatoires (hors photos)
-    for _, row in section_rows.iterrows():
-        q_id = int(row['id'])
-        if q_id == COMMENT_ID: continue
-        if not check_condition(row, answers, collected_data): continue
-        
-        is_mandatory = str(row['obligatoire']).strip().lower() == 'oui'
-        q_type = str(row['type']).strip().lower()
-        val = answers.get(q_id)
-        
-        if is_mandatory and q_type != 'photo':
-            if isinstance(val, list):
-                if not val: missing.append(f"Question {q_id} : {row['question']} (fichier(s) manquant(s))")
-            elif val is None or val == "" or (isinstance(val, (int, float)) and val == 0):
-                missing.append(f"Question {q_id} : {row['question']}")
-
-    # 4. Vérification de l'écart de photos et du commentaire
-    is_photo_count_incorrect = False
-    if expected_total is not None and expected_total > 0:
-        if photo_questions_found and current_photo_count != expected_total:
-            is_photo_count_incorrect = True
-            error_message = (
-                f"⚠️ **Écart de Photos pour '{str(section_name)}'**.\n"
-                f"Attendu : **{str(expected_total)}** (calculé : {str(detail_str)}).\n"
-                f"Reçu : **{str(current_photo_count)}**.\n"
-            )
-            if not has_justification:
-                missing.append(
-                    f"**Commentaire (ID {COMMENT_ID}) :** {COMMENT_QUESTION} "
-                    f"(requis en raison de l'écart de photo : Attendu {expected_total}, Reçu {current_photo_count}).\n\n"
-                    f"{error_message}"
-                )
-
-    # Nettoyage : Si le compte est bon, on retire le commentaire au cas où il ait été rempli par erreur
-    if not is_photo_count_incorrect and COMMENT_ID in answers:
-        del answers[COMMENT_ID]
-
-    return len(missing) == 0, missing
+        # L'expression est maintenant sécurisée, par exemple: "True and False or True"
+        return eval(final_expression_eval)
+    except Exception as e:
+        # print(f"DEBUG Erreur d'évaluation finale : {e}")
+        return False # En cas d'erreur, ne pas afficher la question
 
 # --- SAUVEGARDE ET EXPORTS (inchangées) ---
 def save_form_data(collected_data, project_data, submission_id, start_time):
