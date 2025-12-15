@@ -1,4 +1,4 @@
-# utils.py (Avec gestion des conditions 'ET' et 'OU' et affichage de debug)
+# utils.py (Version Finale avec gestion ET/OU et debug)
 import streamlit as st
 import pandas as pd
 import uuid
@@ -199,6 +199,7 @@ def check_condition(row, current_answers, collected_data):
         all_past_answers.update(phase_data['answers'])
     combined_answers = {**all_past_answers, **current_answers}
     
+    # Nettoyage de la condition brute pour le parsing
     condition_raw = str(row.get('Condition value', '')).strip().strip('"').strip("'")
     if not condition_raw: return True
 
@@ -301,7 +302,7 @@ def validate_section(df_questions, section_name, answers, collected_data, projec
 
 # --- SAUVEGARDE ET EXPORTS (Fonctions inchangées) ---
 def save_form_data(collected_data, project_data, submission_id, start_time):
-    # ... code inchangé ...
+    # ... (inchangé)
     try:
         cleaned_data = []
         for phase in collected_data:
@@ -341,7 +342,7 @@ def save_form_data(collected_data, project_data, submission_id, start_time):
         return False, str(e)
 
 def create_csv_export(collected_data, df_struct, project_name, submission_id, start_time):
-    # ... code inchangé ...
+    # ... (inchangé)
     rows = []
     start_time_str = start_time.strftime('%Y-%m-%d %H:%M:%S') if isinstance(start_time, datetime) else 'N/A'
     end_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -378,7 +379,7 @@ def create_csv_export(collected_data, df_struct, project_name, submission_id, st
     return df_export.to_csv(index=False, sep=';', encoding='utf-8-sig')
 
 def create_zip_export(collected_data):
-    # ... code inchangé ...
+    # ... (inchangé)
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         files_added = 0
@@ -406,7 +407,7 @@ def create_zip_export(collected_data):
     return zip_buffer
 
 def define_custom_styles(doc):
-    # ... code inchangé ...
+    # ... (inchangé)
     # Style de titre principal
     try: title_style = doc.styles.add_style('Report Title', WD_STYLE_TYPE.PARAGRAPH)
     except: title_style = doc.styles['Report Title']
@@ -446,7 +447,7 @@ def define_custom_styles(doc):
     doc.styles['Normal'].font.size = Pt(11)
 
 def create_word_report(collected_data, df_struct, project_data, start_time):
-    # ... code inchangé ...
+    # ... (inchangé)
     doc = Document()
     define_custom_styles(doc)
     
@@ -560,6 +561,15 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
     q_id = int(row.get('id', 0))
     is_dynamic_comment = q_id == COMMENT_ID
     
+    # LIGNE DE DÉBOGAGE : Affiche les valeurs de la condition lues par Python pour TOUTES les questions rendues.
+    # Note : Si une question est masquée par check_condition, cette fonction n'est pas appelée.
+    if not is_dynamic_comment:
+        # On utilise .get(key, '') pour s'assurer qu'une chaîne vide ou 'N/A' est affichée si la valeur est absente.
+        st.write(
+            f"DEBUG Q{q_id}: Cond. ON='{row.get('Condition on', 'N/A')}', "
+            f"Cond. VALUE='{row.get('Condition value', 'N/A')}'"
+        )
+    
     if is_dynamic_comment:
         q_text = COMMENT_QUESTION
         q_type = 'text' 
@@ -604,9 +614,6 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
     widget_key = f"q_{q_id}_{phase_name}_{key_suffix}_{loop_index}"
     current_val = answers.get(q_id)
     val = current_val
-
-    # LIGNE DE DÉBOGAGE : Affiche les valeurs de la condition lues par Python
-    st.write(f"DEBUG Q{q_id}: Condition on={row.get('Condition on')}, Condition value='{row.get('Condition value')}'")
 
     st.markdown(f'<div class="question-card"><div>{label_html}</div>', unsafe_allow_html=True)
     if q_desc: st.markdown(f'<div class="description">⚠️ {q_desc}</div>', unsafe_allow_html=True)
