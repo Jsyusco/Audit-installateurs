@@ -580,18 +580,25 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
         q_mandatory = str(row['obligatoire']).lower() == 'oui'
         q_options = str(row['options']).split(',') if row['options'] else []
         
-        # --- NOUVELLE LOGIQUE POUR L'AFFICHAGE DE LA CONDITION ---
+        # --- LOGIQUE POUR L'AFFICHAGE DE LA CONDITION ---
         condition_value = str(row.get('Condition value', '')).strip()
         condition_on = int(row.get('Condition on', 0))
         
         condition_display = ""
         if condition_on == 1 and condition_value:
-             # Formatte la condition pour un affichage lisible
-            condition_display = (
-                f'<span style="font-size: 0.8em; color: #a0a0a0; font-weight: normal; margin-left: 10px;">'
-                f'[Condition: {condition_value}]'
-                f'</span>'
-            )
+             # 1. Nettoyer les guillemets/apostrophes pour l'affichage (car la DB les contient)
+            # .strip() élimine les espaces
+            # .strip('"') élimine les guillemets doubles
+            # .strip("'") élimine les apostrophes
+            display_value = condition_value.strip().strip('"').strip("'") 
+            
+            # 2. Afficher la condition (si elle n'est pas vide après nettoyage)
+            if display_value:
+                condition_display = (
+                    f'<span style="font-size: 0.8em; color: #a0a0a0; font-weight: normal; margin-left: 10px;">'
+                    f'[Condition: {display_value}]' # Utilisation de display_value nettoyé
+                    f'</span>'
+                )
         # ------------------------------------------------------------
         
     q_text = str(q_text).strip()
@@ -601,18 +608,20 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
     label_html = (
         f"<strong>{q_id}. {q_text}</strong>" 
         + (' <span class="mandatory">*</span>' if q_mandatory else "")
-        + condition_display # <-- AJOUT DE L'AFFICHAGE DE LA CONDITION
+        + condition_display
     )
     
     widget_key = f"q_{q_id}_{phase_name}_{key_suffix}_{loop_index}"
     current_val = answers.get(q_id)
     val = current_val
 
+    # Ligne de débogage - DÉCOMMENTEZ POUR VÉRIFIER LES VALEURS LUES PAR PYTHON
+    # st.write(f"DEBUG Q{q_id}: Condition on={row.get('Condition on')}, Condition value='{row.get('Condition value')}'")
+
     st.markdown(f'<div class="question-card"><div>{label_html}</div>', unsafe_allow_html=True)
     if q_desc: st.markdown(f'<div class="description">⚠️ {q_desc}</div>', unsafe_allow_html=True)
     
-    # ... (Le reste du code de la fonction pour les types de champs: text, select, number, photo)
-    
+    # Éléments de formulaire (inchangés depuis ma proposition précédente)
     if q_type == 'text':
         default_val = current_val if current_val else ""
         if is_dynamic_comment:
