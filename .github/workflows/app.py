@@ -251,13 +251,13 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
               if phase_choice:
                   st.session_state['current_phase_name'] = phase_choice
                   st.session_state['show_comment_on_error'] = False 
-                    st.session_state['last_validation_errors'] = None
+                  st.session_state['last_validation_errors'] = None
                   st.rerun()
               if st.button("⬅️ Retour"):
                   st.session_state['step'] = 'LOOP_DECISION'
                   st.session_state['current_phase_temp'] = {}
                   st.session_state['show_comment_on_error'] = False
-                    st.session_state['last_validation_errors'] = None
+                  st.session_state['last_validation_errors'] = None
                   st.rerun()
         else:
             current_phase = st.session_state['current_phase_name']
