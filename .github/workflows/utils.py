@@ -248,7 +248,7 @@ def validate_section(df_questions, section_name, answers, collected_data, projec
             f"-> Total ajusté: {expected_total}"
         )
 
-    # 2. Compte des photos soumises
+    # 2. Compte des photos soumises (pour le calcul global)
     current_photo_count = 0
     photo_questions_found = False
     
@@ -261,7 +261,7 @@ def validate_section(df_questions, section_name, answers, collected_data, projec
             if isinstance(val, list):
                 current_photo_count += len(val)
 
-    # 3. Vérification des champs obligatoires (hors photos)
+    # 3. Vérification des champs obligatoires (TOUS types, y compris Photos)
     for _, row in section_rows.iterrows():
         q_id = int(row['id'])
         if q_id == COMMENT_ID: continue
@@ -271,31 +271,47 @@ def validate_section(df_questions, section_name, answers, collected_data, projec
         q_type = str(row['type']).strip().lower()
         val = answers.get(q_id)
         
-        if is_mandatory and q_type != 'photo':
-            if isinstance(val, list):
-                if not val: missing.append(f"Question {q_id} : {row['question']} (fichier(s) manquant(s))")
-            elif val is None or val == "" or (isinstance(val, (int, float)) and val == 0):
-                missing.append(f"Question {q_id} : {row['question']}")
+        if is_mandatory:
+            # Cas spécifique PHOTO : Doit contenir au moins un fichier
+            if q_type == 'photo':
+                if not isinstance(val, list) or len(val) == 0:
+                    missing.append(f"Question {q_id} : {row['question']} (Au moins une photo est requise)")
+            
+            # Cas autres champs (Text, Number, Select)
+            else:
+                if isinstance(val, list):
+                    if not val: missing.append(f"Question {q_id} : {row['question']} (fichier(s) manquant(s))")
+                elif val is None or val == "" or (isinstance(val, (int, float)) and val == 0):
+                    missing.append(f"Question {q_id} : {row['question']}")
 
-    # 4. Vérification de l'écart de photos et du commentaire
+    # 4. Vérification de l'écart de photos (Minimum attendu vs Réel)
+    # Cette étape vérifie le TOTAL pour la section. 
+    # Si le total n'est pas bon, un commentaire est requis.
     is_photo_count_incorrect = False
     if expected_total is not None and expected_total > 0:
-        if photo_questions_found and current_photo_count != expected_total:
-            is_photo_count_incorrect = True
-            error_message = (
-                f"⚠️ **Écart de Photos pour '{str(section_name)}'**.\n"
-                f"Attendu : **{str(expected_total)}** (calculé : {str(detail_str)}).\n"
-                f"Reçu : **{str(current_photo_count)}**.\n"
-            )
-            if not has_justification:
-                missing.append(
-                    f"**Commentaire (ID {COMMENT_ID}) :** {COMMENT_QUESTION} "
-                    f"(requis en raison de l'écart de photo : Attendu {expected_total}, Reçu {current_photo_count}).\n\n"
-                    f"{error_message}"
+        if photo_questions_found and current_photo_count < expected_total: # Note: j'ai mis < stricte ou != selon votre besoin, souvent c'est le minimum qui compte
+             # Si on veut strictement égal, gardez !=. Si c'est un minimum, utilisez <. 
+             # Votre demande disait "minimum de photo attendu", donc je garde la logique d'écart si différent.
+            if current_photo_count != expected_total:
+                is_photo_count_incorrect = True
+                error_message = (
+                    f"⚠️ **Écart de Photos pour '{str(section_name)}'**.\n"
+                    f"Attendu : **{str(expected_total)}** (calculé : {str(detail_str)}).\n"
+                    f"Reçu : **{str(current_photo_count)}**.\n"
                 )
+                # Si pas de justification, on bloque (Sauf si la règle "Obligatoire" ci-dessus a déjà bloqué, 
+                # mais ce message est plus précis pour le total)
+                if not has_justification:
+                    missing.append(
+                        f"**Commentaire (ID {COMMENT_ID}) :** {COMMENT_QUESTION} "
+                        f"(requis en raison de l'écart de photo : Attendu {expected_total}, Reçu {current_photo_count}).\n\n"
+                        f"{error_message}"
+                    )
 
     # Nettoyage : Si le compte est bon, on retire le commentaire au cas où il ait été rempli par erreur
     if not is_photo_count_incorrect and COMMENT_ID in answers:
+        # Optionnel : on peut vouloir garder le commentaire même si le compte est bon, 
+        # mais la logique actuelle le supprime.
         del answers[COMMENT_ID]
 
     return len(missing) == 0, missing
