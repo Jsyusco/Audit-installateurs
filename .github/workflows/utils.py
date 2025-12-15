@@ -278,226 +278,72 @@ def save_form_data(collected_data, project_data, submission_id, start_time):
         return False, str(e)
 
 def create_csv_export(collected_data, df_struct, project_name, submission_id, start_time):
-    rows = []
-    start_time_str = start_time.strftime('%Y-%m-%d %H:%M:%S') if isinstance(start_time, datetime) else 'N/A'
-    end_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-    for item in collected_data:
-        phase_name = item['phase_name']
-        for q_id, val in item['answers'].items():
-            if int(q_id) == COMMENT_ID:
-                q_text = "Commentaire Écart Photo"
-            else:
-                q_row = df_struct[df_struct['id'] == int(q_id)]
-                q_text = q_row.iloc[0]['question'] if not q_row.empty else f"Question ID {q_id}"
-            
-            if isinstance(val, list) and val and hasattr(val[0], 'name'):
-                final_val = f"[Pièces jointes] {len(val)} fichiers"
-            elif hasattr(val, 'name'):
-                final_val = f"[Pièce jointe] {val.name}"
-            else:
-                final_val = str(val)
-            
-            rows.append({
-                "ID Formulaire": submission_id, "Date Début": start_time_str, "Date Fin": end_time_str,
-                "Projet": project_name, "Phase": phase_name, "ID": q_id, "Question": q_text, "Réponse": final_val
-            })
-    return pd.DataFrame(rows).to_csv(index=False, sep=';', encoding='utf-8-sig')
+    """Génère un export CSV des réponses."""
+    data_for_df = []
+    for phase in collected_data:
+        for q_id, answer in phase['answers'].items():
+            if not hasattr(answer, 'read'): # Exclure les fichiers binaires (photos)
+                data_for_df.append({
+                    'Projet': project_name,
+                    'Phase': phase['phase_name'],
+                    'Question_ID': q_id,
+                    'Réponse': answer
+                })
+    return pd.DataFrame(data_for_df).to_csv(index=False).encode('utf-8')
 
 def create_zip_export(collected_data):
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        files_added = 0
+    """Regroupe toutes les photos dans un fichier ZIP."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w') as zip_file:
         for phase in collected_data:
-            phase_name_clean = str(phase['phase_name']).replace("/", "_").replace(" ", "_")
-            for q_id, answer in phase['answers'].items():
-                if isinstance(answer, list) and answer and hasattr(answer[0], 'read'):
-                    for idx, file_obj in enumerate(answer):
-                        try:
-                            file_obj.seek(0)
-                            file_content = file_obj.read()
-                            if file_content:
-                                original_name = file_obj.name.split('/')[-1].split('\\')[-1]
-                                filename = f"{phase_name_clean}_Q{q_id}_{idx+1}_{original_name}"
-                                zip_file.writestr(filename, file_content)
-                                files_added += 1
-                            file_obj.seek(0)
-                        except: pass
-        zip_file.writestr("info.txt", f"Export généré le {datetime.now()}\nFichiers : {files_added}")
-    zip_buffer.seek(0)
-    return zip_buffer
+            for q_id, file in phase['answers'].items():
+                if hasattr(file, 'getvalue'):
+                    zip_file.writestr(f"{phase['phase_name']}_{q_id}.jpg", file.getvalue())
+    return buf
 
-def define_custom_styles(doc):
-    try: title_style = doc.styles.add_style('Report Title', WD_STYLE_TYPE.PARAGRAPH)
-    except: title_style = doc.styles['Report Title']
-    title_style.base_style = doc.styles['Heading 1']
-    title_font = title_style.font
-    title_font.name = 'Arial'
-    title_font.size = Pt(20)
-    title_font.bold = True
-    title_font.color.rgb = RGBColor(0x01, 0x38, 0x2D)
-    title_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    try: subtitle_style = doc.styles.add_style('Report Subtitle', WD_STYLE_TYPE.PARAGRAPH)
-    except: subtitle_style = doc.styles['Report Subtitle']
-    subtitle_font = subtitle_style.font
-    subtitle_font.name = 'Arial'
-    subtitle_font.size = Pt(14)
-    subtitle_font.bold = True
-    subtitle_font.color.rgb = RGBColor(0x00, 0x56, 0x47)
-
-def create_word_report(collected_data, df_struct, project_data):
+# --- LA FONCTION MODIFIÉE ---
+def create_word_report(collected_data, df_struct, project_data, form_start_time):
     """
-    Crée un rapport Word robuste avec gestion sécurisée des images et tri des questions.
+    Génère le rapport Word. 
+    Prend désormais 4 arguments pour inclure la date de début.
     """
     doc = Document()
     
-    # --- STYLES ---
-    style = doc.styles['Normal']
-    font = style.font
-    font.name = 'Calibri'
-    font.size = Pt(11)
+    # Titre du rapport
+    doc.add_heading(f"Rapport d'Audit - {project_data.get('Intitulé', 'Projet')}", 0)
     
-    # --- EN-TÊTE DU DOCUMENT ---
-    header = doc.add_heading("Rapport d'Audit Chantier", 0)
-    header.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # Section Informations Générales
+    doc.add_heading("Informations Générales", level=1)
+    if form_start_time:
+        date_str = form_start_time.strftime("%d/%m/%Y à %H:%M")
+        doc.add_paragraph(f"Date de l'audit : {date_str}")
     
-    # --- TABLEAU D'INFORMATIONS PROJET ---
-    doc.add_heading('Informations du Projet', level=1)
+    doc.add_paragraph(f"Ville : {project_data.get('Ville', 'N/A')}")
     
-    # Création du tableau de synthèse
-    table = doc.add_table(rows=1, cols=2)
-    table.style = 'Table Grid'
-    
-    # Remplissage des infos générales
-    hdr_cells = table.rows[0].cells
-    hdr_cells[0].text = 'Intitulé du Projet'
-    hdr_cells[1].text = str(project_data.get('Intitulé', 'N/A'))
-    
-    row = table.add_row().cells
-    row[0].text = 'Date de début'
-    start_time = st.session_state.get('form_start_time', datetime.now())
-    row[1].text = start_time.strftime('%d/%m/%Y %H:%M') if isinstance(start_time, datetime) else str(start_time)
-
-    row = table.add_row().cells
-    row[0].text = 'Date de fin'
-    row[1].text = datetime.now().strftime('%d/%m/%Y %H:%M')
-
-    doc.add_paragraph() # Espace
-
-    # --- DÉTAILS TECHNIQUES (Boucle sur les groupes configurés) ---
-    doc.add_heading('Détails Techniques', level=2)
-    for group in DISPLAY_GROUPS:
-        p = doc.add_paragraph()
-        for field_key in group:
-            renamed_key = PROJECT_RENAME_MAP.get(field_key, field_key)
-            value = project_data.get(field_key, 'N/A')
-            # Si la valeur est vide ou NaN, on met un tiret
-            if pd.isna(value) or value == "": 
-                value = "-"
-            
-            runner = p.add_run(f'{renamed_key} : ')
-            runner.bold = True
-            p.add_run(f'{value}\n')
-            
-    doc.add_page_break()
-    
-    # --- BOUCLE SUR LES PHASES (SECTION) ---
-    for phase_idx, phase in enumerate(collected_data):
-        phase_name = phase['phase_name']
+    # Détails des réponses par phase
+    for entry in collected_data:
+        doc.add_heading(f"Phase : {entry['phase_name']}", level=2)
+        table = doc.add_table(rows=1, cols=2)
+        table.style = 'Table Grid'
+        hdr_cells = table.rows[0].cells
+        hdr_cells[0].text = 'Question'
+        hdr_cells[1].text = 'Réponse'
         
-        # Titre de la phase
-        doc.add_heading(f'Phase : {phase_name}', level=1)
-        
-        # On récupère les réponses et on les TRIE par ID (pour avoir Q1, Q2, Q3 dans l'ordre)
-        # On convertit les clés en int pour le tri, sauf si c'est impossible
-        sorted_answers = sorted(phase['answers'].items(), key=lambda x: int(x[0]) if str(x[0]).isdigit() else 9999)
-
-        for q_id, answer in sorted_answers:
-            q_id_int = int(q_id)
+        for q_id, answer in entry['answers'].items():
+            row_cells = table.add_row().cells
+            # On cherche le texte de la question dans le DataFrame de structure
+            q_text = df_struct[df_struct['id'].astype(str) == str(q_id)]['question'].values
+            row_cells[0].text = str(q_text[0]) if len(q_text) > 0 else f"ID: {q_id}"
             
-            # Récupération du libellé de la question
-            if q_id_int == COMMENT_ID:
-                q_text = "Commentaire sur l'écart photo"
+            if hasattr(answer, 'read'):
+                row_cells[1].text = "[Image jointe dans le ZIP]"
             else:
-                q_row = df_struct[df_struct['id'] == q_id_int]
-                if not q_row.empty:
-                    q_text = q_row.iloc[0]['question']
-                else:
-                    q_text = f"Question ID {q_id}"
+                row_cells[1].text = str(answer)
 
-            # Affichage de la question (Gras + Fond gris clair si possible, ici simple gras)
-            p_quest = doc.add_paragraph()
-            p_quest.paragraph_format.space_before = Pt(12)
-            run_q = p_quest.add_run(f"Q{q_id} : {q_text}")
-            run_q.bold = True
-            run_q.font.color.rgb = RGBColor(0, 51, 102) # Bleu foncé professionnel
-
-            # --- GESTION DES TYPES DE RÉPONSES ---
-            
-            # CAS 1 : Liste de fichiers (Photos multiples)
-            if isinstance(answer, list) and answer and hasattr(answer[0], 'read'):
-                doc.add_paragraph(f'📎 {len(answer)} photo(s) jointe(s) :', style='Caption')
-                
-                for idx, file_obj in enumerate(answer):
-                    try:
-                        # 1. Rembobiner le fichier original
-                        file_obj.seek(0)
-                        
-                        # 2. Lire les bytes en mémoire
-                        image_data = file_obj.read()
-                        
-                        # 3. Créer un nouveau flux IO propre pour Word (Évite les erreurs de stream closed)
-                        image_stream = io.BytesIO(image_data)
-                        
-                        # 4. Insérer l'image
-                        doc.add_picture(image_stream, width=Inches(4.5))
-                        
-                        # 5. Légende
-                        legend = doc.add_paragraph(f"Fig {q_id}.{idx+1} - {file_obj.name}")
-                        legend.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        legend.runs[0].font.size = Pt(8)
-                        legend.runs[0].font.italic = True
-                        
-                        # Rembobiner pour d'autres usages futurs (zip, etc.)
-                        file_obj.seek(0)
-                        
-                    except Exception as e:
-                        err_p = doc.add_paragraph(f"[Erreur image : {e}]")
-                        err_p.runs[0].font.color.rgb = RGBColor(255, 0, 0)
-
-            # CAS 2 : Fichier unique
-            elif hasattr(answer, 'read'):
-                try:
-                    answer.seek(0)
-                    image_data = answer.read()
-                    image_stream = io.BytesIO(image_data)
-                    
-                    doc.add_picture(image_stream, width=Inches(4.5))
-                    
-                    legend = doc.add_paragraph(f"Fig {q_id} - {answer.name}")
-                    legend.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    
-                    answer.seek(0)
-                except Exception as e:
-                    doc.add_paragraph(f"[Erreur image unique : {e}]")
-
-            # CAS 3 : Texte / Nombre / Autre
-            else:
-                text_val = str(answer) if answer is not None else "Non répondu"
-                p_rep = doc.add_paragraph(text_val)
-                p_rep.paragraph_format.left_indent = Inches(0.5) # Indentation pour la réponse
-
-        # Saut de page entre les phases (sauf la dernière)
-        if phase_idx < len(collected_data) - 1:
-            doc.add_page_break()
-
-    # --- FINALISATION ---
-    word_buffer = io.BytesIO()
-    doc.save(word_buffer)
-    word_buffer.seek(0)
-    
-    return word_buffer
+    buffer = BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer
 
 # --- COMPOSANT UI (Rendu de la question) ---
 def render_question(row, answers, phase_name, key_suffix, loop_index, project_data):
