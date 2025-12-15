@@ -151,16 +151,15 @@ elif st.session_state['step'] == 'IDENTIFICATION':
     if st.button("✅ Valider l'identification"):
         st.session_state['last_validation_errors'] = None # Réinitialisation à la tentative de validation
         
-        # --- CORRECTION ROBUSTESSE IDENTIFICATION ---
+        # --- CORRECTION ROBUSTESSE IDENTIFICATION (Vérification df_struct) ---
         df_struct = st.session_state.get('df_struct')
         if df_struct is None:
             st.error("Structure du formulaire manquante. Veuillez recharger le projet.")
             st.experimental_rerun()
-            # Utilisation de st.experimental_rerun() pour rafraîchir et afficher l'erreur immédiatement.
-            # Le 'return' n'est pas nécessaire ici car rerun arrête l'exécution.
-        # -------------------------------------------
+        # --------------------------------------------------------------------
         
         is_valid, errors = utils.validate_section(df_struct, ID_SECTION_NAME, st.session_state['current_phase_temp'], st.session_state['collected_data'], st.session_state['project_data'])
+        
         if is_valid:
             id_entry = {"phase_name": ID_SECTION_NAME, "answers": st.session_state['current_phase_temp'].copy()}
             st.session_state['collected_data'].append(id_entry)
@@ -172,9 +171,13 @@ elif st.session_state['step'] == 'IDENTIFICATION':
             st.success("Identification validée.")
             st.rerun()
         else:
-            html_errors = '<br>'.join([f"- {e}" for e in errors])
+            # --- CORRECTION ROBUSTESSE D'ERREUR V2 ---
+            cleaned_errors = [str(e) for e in errors if e is not None]
+
+            html_errors = '<br>'.join([f"- {e}" for e in cleaned_errors])
             st.session_state['last_validation_errors'] = html_errors
             st.experimental_rerun() 
+            # -----------------------------------------
 
 # 4. BOUCLE PHASES
 elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
@@ -314,7 +317,7 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                     st.session_state['show_comment_on_error'] = False
                     st.session_state['last_validation_errors'] = None
 
-                    # --- CORRECTION ROBUSTESSE PHASE (Celle qui cause l'erreur) ---
+                    # --- CORRECTION ROBUSTESSE PHASE (Vérification df_struct) ---
                     df_struct = st.session_state.get('df_struct')
                     if df_struct is None:
                         st.error("Structure du formulaire manquante. Veuillez recharger le projet.")
@@ -322,7 +325,7 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                     # -------------------------------------------------------------
                     
                     is_valid, errors = utils.validate_section(
-                        df_struct, # Utiliser la variable locale vérifiée
+                        df_struct, 
                         current_phase, 
                         st.session_state['current_phase_temp'], 
                         st.session_state['collected_data'], 
@@ -337,13 +340,17 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                         st.session_state['last_validation_errors'] = None
                         st.rerun()
                     else:
+                        # --- CORRECTION ROBUSTESSE D'ERREUR V2 ---
+                        cleaned_errors = [str(e) for e in errors if e is not None]
+
                         # Vérifie si l'erreur est liée au manque de justification pour les photos
-                        is_photo_error = any(f"Commentaire (ID {utils.COMMENT_ID})" in e for e in errors)
+                        is_photo_error = any(f"Commentaire (ID {utils.COMMENT_ID})" in e for e in cleaned_errors)
                         if is_photo_error: st.session_state['show_comment_on_error'] = True
                         
-                        html_errors = '<br>'.join([f"- {e}" for e in errors])
+                        html_errors = '<br>'.join([f"- {e}" for e in cleaned_errors])
                         st.session_state['last_validation_errors'] = html_errors
                         st.experimental_rerun() 
+                        # -----------------------------------------
             st.markdown('</div>', unsafe_allow_html=True)
 
 # 5. FIN / EXPORTS
