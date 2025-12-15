@@ -1,4 +1,4 @@
-# utils.py (À placer dans votre repository partagé 'shared-utils')
+# utils.py (Avec gestion des conditions 'ET' et 'OU')
 import streamlit as st
 import pandas as pd
 import uuid
@@ -130,6 +130,7 @@ def load_site_data_from_firestore():
         return None
 
 # --- LOGIQUE MÉTIER ---
+
 def get_expected_photo_count(section_name, project_data):
     """Calcule le nombre de photos attendues pour une section donnée."""
     if section_name.strip() not in SECTION_PHOTO_RULES:
@@ -157,30 +158,71 @@ def get_expected_photo_count(section_name, project_data):
     detail_str = " + ".join(details)
     return total_expected, detail_str
 
-def check_condition(row, current_answers, collected_data):
-    """Vérifie si une question doit être affichée en fonction des réponses précédentes."""
-    try:
-        if int(row.get('Condition on', 0)) != 1: return True
-    except (ValueError, TypeError): return True
-
-    all_past_answers = {}
-    for phase_data in collected_data: all_past_answers.update(phase_data['answers'])
-    combined_answers = {**all_past_answers, **current_answers}
-    
-    condition_str = str(row.get('Condition value', '')).strip()
-    if not condition_str or "=" not in condition_str: return True
-
+def evaluate_single_condition(condition_str, all_answers):
+    """
+    Évalue une condition unitaire de type 'ID = Valeur'.
+    Retourne True si la condition est respectée, False sinon.
+    """
+    if "=" not in condition_str:
+        return True # Par défaut, si pas de format strict, on affiche
+        
     try:
         target_id_str, expected_value_raw = condition_str.split('=', 1)
         target_id = int(target_id_str.strip())
         expected_value = expected_value_raw.strip().strip('"').strip("'")
-        user_answer = combined_answers.get(target_id)
+        
+        user_answer = all_answers.get(target_id)
         
         if user_answer is not None:
-            return str(user_answer).lower() == str(expected_value).lower()
+            # Comparaison insensible à la casse et aux espaces
+            return str(user_answer).strip().lower() == str(expected_value).strip().lower()
         else:
             return False
-    except Exception: return True
+    except Exception:
+        return True # En cas d'erreur de parsing, on affiche par sécurité
+
+def check_condition(row, current_answers, collected_data):
+    """
+    Vérifie si une question doit être affichée en fonction des réponses précédentes.
+    Gère les opérateurs 'ET' et 'OU'.
+    Priorité : Le 'OU' sépare les blocs majeurs, le 'ET' lie les conditions au sein d'un bloc.
+    Exemple : "10=Oui ET 11=Non OU 12=Peut-être" 
+    sera interprété comme : (10=Oui ET 11=Non) OU (12=Peut-être)
+    """
+    try:
+        # Si 'Condition on' n'est pas 1, la condition est inactive -> on affiche
+        if int(row.get('Condition on', 0)) != 1: return True
+    except (ValueError, TypeError): return True
+
+    # Consolidation de toutes les réponses (passées et actuelles)
+    all_past_answers = {}
+    for phase_data in collected_data: 
+        all_past_answers.update(phase_data['answers'])
+    combined_answers = {**all_past_answers, **current_answers}
+    
+    condition_raw = str(row.get('Condition value', '')).strip()
+    if not condition_raw: return True
+
+    # 1. Découpage par "OU" (Si un des blocs est Vrai, tout est Vrai)
+    or_blocks = condition_raw.split(' OU ')
+    
+    for block in or_blocks:
+        # 2. Découpage par "ET" (Dans un bloc, TOUT doit être Vrai)
+        and_conditions = block.split(' ET ')
+        block_is_valid = True
+        
+        for atom in and_conditions:
+            # Utilisation de la nouvelle fonction pour évaluer chaque condition unitaire
+            if not evaluate_single_condition(atom, combined_answers):
+                block_is_valid = False
+                break # Une condition du ET est fausse, le bloc est faux
+        
+        if block_is_valid:
+            return True # Un bloc entier est valide, donc la condition est remplie (grâce au OU)
+
+    # Si aucun bloc n'a retourné True
+    return False
+
 
 def validate_section(df_questions, section_name, answers, collected_data, project_data):
     """Valide les réponses d'une section, y compris le compte de photos si applicable."""
@@ -258,7 +300,7 @@ def validate_section(df_questions, section_name, answers, collected_data, projec
 
     return len(missing) == 0, missing
 
-# --- SAUVEGARDE ET EXPORTS (inchangées) ---
+# --- SAUVEGARDE ET EXPORTS ---
 def save_form_data(collected_data, project_data, submission_id, start_time):
     # ... code inchangé ...
     try:
@@ -510,15 +552,6 @@ def create_word_report(collected_data, df_struct, project_data, start_time):
     doc.save(word_buffer)
     word_buffer.seek(0)
     return word_buffer
-
-# --- COMPOSANT UI (rendu de la question) ---
-# utils.py - Fonction render_question (complète)
-
-# ... (Le reste du code de utils.py reste inchangé) ...
-
-# --- COMPOSANT UI (rendu de la question) ---
-# utils.py - Fonction render_question (complète et corrigée)
-# ... (N'oubliez pas les imports et le reste de votre fichier utils.py) ...
 
 # --- COMPOSANT UI (rendu de la question) ---
 def render_question(row, answers, phase_name, key_suffix, loop_index, project_data):
