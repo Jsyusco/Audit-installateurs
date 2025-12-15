@@ -158,6 +158,7 @@ elif st.session_state['step'] == 'IDENTIFICATION':
             st.experimental_rerun()
         # --------------------------------------------------------------------
         
+        # NOTE: On n'utilise pas le try/except ici pour ne pas masquer d'erreur dans l'étape initiale
         is_valid, errors = utils.validate_section(df_struct, ID_SECTION_NAME, st.session_state['current_phase_temp'], st.session_state['collected_data'], st.session_state['project_data'])
         
         if is_valid:
@@ -324,14 +325,24 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                         st.experimental_rerun()
                     # -------------------------------------------------------------
                     
-                    is_valid, errors = utils.validate_section(
-                        df_struct, 
-                        current_phase, 
-                        st.session_state['current_phase_temp'], 
-                        st.session_state['collected_data'], 
-                        st.session_state['project_data']
-                    )
-                    
+                    # --- NOUVEAU BLOC TRY/EXCEPT POUR ISOLER L'ATTRIBUTERROR ---
+                    try:
+                        is_valid, errors = utils.validate_section(
+                            df_struct, 
+                            current_phase, 
+                            st.session_state['current_phase_temp'], 
+                            st.session_state['collected_data'], 
+                            st.session_state['project_data']
+                        )
+                    except AttributeError as e:
+                        # Si l'erreur se produit DANS la fonction de validation
+                        st.session_state['last_validation_errors'] = f"Erreur critique dans la validation (AttributeError) : {e}"
+                        st.error(f"Erreur interne : {e}. Veuillez contacter le support. (Code: ATTRIB-VALID)")
+                        st.session_state['show_comment_on_error'] = True # Afficher le champ commentaire au cas où
+                        st.experimental_rerun()
+                        return # Arrête l'exécution pour ne pas continuer dans le bloc 'if is_valid'/'else'
+                    # -----------------------------------------------------------------
+
                     if is_valid:
                         new_entry = {"phase_name": current_phase, "answers": st.session_state['current_phase_temp'].copy()}
                         st.session_state['collected_data'].append(new_entry)
