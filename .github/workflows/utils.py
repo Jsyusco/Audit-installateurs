@@ -7,6 +7,7 @@ from firebase_admin import credentials, firestore
 from datetime import datetime
 import numpy as np
 import zipfile
+from io import BytesIO
 import io
 import urllib.parse
 from docx import Document
