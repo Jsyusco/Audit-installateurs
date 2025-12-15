@@ -1,4 +1,4 @@
-# utils.py (Version Corrigée et Optimisée)
+# utils.py (À placer dans votre repository partagé 'shared-utils')
 import streamlit as st
 import pandas as pd
 import uuid
@@ -16,8 +16,6 @@ from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.table import WD_ALIGN_VERTICAL
 
 # --- CONSTANTES ---
-# ... (inchangé)
-
 PROJECT_RENAME_MAP = {
     'Intitulé': 'Intitulé',
     'Fournisseur Bornes AC [Bornes]': 'Fournisseur Bornes AC',
@@ -91,7 +89,7 @@ def load_form_structure_from_firestore():
         df = pd.DataFrame(data)
         df.columns = df.columns.str.strip()
         
-        # Normalisation des noms de colonnes
+        # Normalisation des noms de colonnes (résout les problèmes de typo)
         rename_map = {'Conditon value': 'Condition value', 'condition value': 'Condition value', 'Condition Value': 'Condition value', 'Condition': 'Condition value', 'Conditon on': 'Condition on', 'condition on': 'Condition on'}
         actual_rename = {k: v for k, v in rename_map.items() if k in df.columns}
         df = df.rename(columns=actual_rename)
@@ -104,12 +102,7 @@ def load_form_structure_from_firestore():
         df['options'] = df['options'].fillna('')
         df['Description'] = df['Description'].fillna('')
         df['Condition value'] = df['Condition value'].fillna('')
-
-        # 🚀 CORRECTION MAJEURE : Assurer que 'Condition on' est un entier (1 ou 0)
-        # La valeur est chargée en tant que Number (float 1.0) et non String.
-        # to_numeric permet de convertir 1.0 en float, puis fillna(0) gère les NaN,
-        # et astype(int) finalise la conversion.
-        df['Condition on'] = pd.to_numeric(df['Condition on'], errors='coerce').fillna(0).astype(int)
+        df['Condition on'] = df['Condition on'].apply(lambda x: int(x) if pd.notna(x) and str(x).isdigit() else 0)
         
         for col in df.select_dtypes(include=['object']).columns:
             df[col] = df[col].astype(str).str.strip()
@@ -124,7 +117,6 @@ def load_form_structure_from_firestore():
 
 @st.cache_data(ttl=3600)
 def load_site_data_from_firestore():
-    # ... (inchangé)
     """Charge les données des sites depuis la collection 'Sites'."""
     try:
         docs = db.collection('Sites').get()
@@ -138,9 +130,7 @@ def load_site_data_from_firestore():
         return None
 
 # --- LOGIQUE MÉTIER ---
-
 def get_expected_photo_count(section_name, project_data):
-    # ... (inchangé)
     """Calcule le nombre de photos attendues pour une section donnée."""
     if section_name.strip() not in SECTION_PHOTO_RULES:
         return None, None 
@@ -167,80 +157,32 @@ def get_expected_photo_count(section_name, project_data):
     detail_str = " + ".join(details)
     return total_expected, detail_str
 
-def evaluate_single_condition(condition_str, all_answers):
-    # ... (inchangé)
-    """
-    Évalue une condition unitaire de type 'ID = Valeur'.
-    Retourne True si la condition est respectée, False sinon.
-    """
-    if "=" not in condition_str:
-        return True # Par défaut, si pas de format strict, on affiche
-        
+def check_condition(row, current_answers, collected_data):
+    """Vérifie si une question doit être affichée en fonction des réponses précédentes."""
+    try:
+        if int(row.get('Condition on', 0)) != 1: return True
+    except (ValueError, TypeError): return True
+
+    all_past_answers = {}
+    for phase_data in collected_data: all_past_answers.update(phase_data['answers'])
+    combined_answers = {**all_past_answers, **current_answers}
+    
+    condition_str = str(row.get('Condition value', '')).strip()
+    if not condition_str or "=" not in condition_str: return True
+
     try:
         target_id_str, expected_value_raw = condition_str.split('=', 1)
         target_id = int(target_id_str.strip())
-        
-        # Nettoie les guillemets/apostrophes pour la comparaison
         expected_value = expected_value_raw.strip().strip('"').strip("'")
-        
-        user_answer = all_answers.get(target_id)
+        user_answer = combined_answers.get(target_id)
         
         if user_answer is not None:
-            # Comparaison insensible à la casse et aux espaces
-            return str(user_answer).strip().lower() == str(expected_value).strip().lower()
+            return str(user_answer).lower() == str(expected_value).lower()
         else:
             return False
-    except Exception:
-        return True # En cas d'erreur de parsing, on affiche par sécurité
-
-def check_condition(row, current_answers, collected_data):
-    # ... (inchangé, fonctionne correctement après la correction de la lecture)
-    """
-    Vérifie si une question doit être affichée en fonction des réponses précédentes.
-    Gère les opérateurs 'ET' et 'OU'.
-    """
-    try:
-        # Après la correction de load_form_structure_from_firestore, 
-        # row.get('Condition on', 0) est garanti d'être 1 ou 0.
-        if int(row.get('Condition on', 0)) != 1: return True
-    except (ValueError, TypeError): 
-        # Cette exception ne devrait plus survenir si la DB est bien typée, 
-        # mais on la garde par sécurité.
-        return True
-
-    # Consolidation de toutes les réponses (passées et actuelles)
-    all_past_answers = {}
-    for phase_data in collected_data: 
-        all_past_answers.update(phase_data['answers'])
-    combined_answers = {**all_past_answers, **current_answers}
-    
-    # Nettoyage de la condition brute pour le parsing
-    condition_raw = str(row.get('Condition value', '')).strip().strip('"').strip("'")
-    if not condition_raw: return True
-
-    # 1. Découpage par "OU" (Si un des blocs est Vrai, tout est Vrai)
-    or_blocks = condition_raw.split(' OU ')
-    
-    for block in or_blocks:
-        # 2. Découpage par "ET" (Dans un bloc, TOUT doit être Vrai)
-        and_conditions = block.split(' ET ')
-        block_is_valid = True
-        
-        for atom in and_conditions:
-            # Utilisation de la fonction evaluate_single_condition
-            if not evaluate_single_condition(atom, combined_answers):
-                block_is_valid = False
-                break # Une condition du ET est fausse, le bloc est faux
-        
-        if block_is_valid:
-            return True # Un bloc entier est valide, donc la condition est remplie (grâce au OU)
-
-    # Si aucun bloc n'a retourné True
-    return False
-
+    except Exception: return True
 
 def validate_section(df_questions, section_name, answers, collected_data, project_data):
-    # ... (inchangé)
     """Valide les réponses d'une section, y compris le compte de photos si applicable."""
     missing = []
     section_rows = df_questions[df_questions['section'] == section_name]
@@ -316,9 +258,9 @@ def validate_section(df_questions, section_name, answers, collected_data, projec
 
     return len(missing) == 0, missing
 
-# --- SAUVEGARDE ET EXPORTS (Fonctions inchangées) ---
+# --- SAUVEGARDE ET EXPORTS (inchangées) ---
 def save_form_data(collected_data, project_data, submission_id, start_time):
-    # ... (inchangé)
+    # ... code inchangé ...
     try:
         cleaned_data = []
         for phase in collected_data:
@@ -333,7 +275,7 @@ def save_form_data(collected_data, project_data, submission_id, start_time):
                     clean_phase["answers"][str(k)] = f"Fichiers (non stockés en DB): {file_names}"
                 
                 elif hasattr(v, 'read'): 
-                    clean_phase["answers"][str(k)] = f"Fichier (non stocké en DB): {v.name}"
+                     clean_phase["answers"][str(k)] = f"Fichier (non stocké en DB): {v.name}"
                 else:
                     clean_phase["answers"][str(k)] = v
             
@@ -358,7 +300,7 @@ def save_form_data(collected_data, project_data, submission_id, start_time):
         return False, str(e)
 
 def create_csv_export(collected_data, df_struct, project_name, submission_id, start_time):
-    # ... (inchangé)
+    # ... code inchangé ...
     rows = []
     start_time_str = start_time.strftime('%Y-%m-%d %H:%M:%S') if isinstance(start_time, datetime) else 'N/A'
     end_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -395,7 +337,7 @@ def create_csv_export(collected_data, df_struct, project_name, submission_id, st
     return df_export.to_csv(index=False, sep=';', encoding='utf-8-sig')
 
 def create_zip_export(collected_data):
-    # ... (inchangé)
+    # ... code inchangé ...
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         files_added = 0
@@ -423,7 +365,7 @@ def create_zip_export(collected_data):
     return zip_buffer
 
 def define_custom_styles(doc):
-    # ... (inchangé)
+    # ... code inchangé ...
     # Style de titre principal
     try: title_style = doc.styles.add_style('Report Title', WD_STYLE_TYPE.PARAGRAPH)
     except: title_style = doc.styles['Report Title']
@@ -463,7 +405,7 @@ def define_custom_styles(doc):
     doc.styles['Normal'].font.size = Pt(11)
 
 def create_word_report(collected_data, df_struct, project_data, start_time):
-    # ... (inchangé)
+    # ... code inchangé ...
     doc = Document()
     define_custom_styles(doc)
     
@@ -527,21 +469,21 @@ def create_word_report(collected_data, df_struct, project_data, start_time):
             if is_photo_answer:
                 doc.add_paragraph(f'Q{q_id}: {q_text}', style='Report Subtitle')
                 if isinstance(answer, list):
-                    doc.add_paragraph(f'Nombre de photos: {len(answer)}', style='Report Text')
-                    for idx, file_obj in enumerate(answer):
-                        try:
-                            file_obj.seek(0)
-                            image_data = file_obj.read()
-                            if image_data:
-                                image_stream = io.BytesIO(image_data)
-                                doc.add_picture(image_stream, width=Inches(5)) 
-                                caption = doc.add_paragraph(f'Photo {idx+1}: {file_obj.name}', style='Report Text')
-                                caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                caption.runs[0].font.size = Pt(9)
-                                caption.runs[0].font.italic = True
-                                file_obj.seek(0)
-                            except Exception as e:
-                                doc.add_paragraph(f'[Erreur photo {idx+1}: {e}]', style='Report Text')
+                     doc.add_paragraph(f'Nombre de photos: {len(answer)}', style='Report Text')
+                     for idx, file_obj in enumerate(answer):
+                         try:
+                             file_obj.seek(0)
+                             image_data = file_obj.read()
+                             if image_data:
+                                 image_stream = io.BytesIO(image_data)
+                                 doc.add_picture(image_stream, width=Inches(5)) 
+                                 caption = doc.add_paragraph(f'Photo {idx+1}: {file_obj.name}', style='Report Text')
+                                 caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                 caption.runs[0].font.size = Pt(9)
+                                 caption.runs[0].font.italic = True
+                                 file_obj.seek(0)
+                         except Exception as e:
+                             doc.add_paragraph(f'[Erreur photo {idx+1}: {e}]', style='Report Text')
                 doc.add_paragraph()
 
             # 2. Traitement des autres types de réponses (texte, nombre, select)
@@ -570,22 +512,23 @@ def create_word_report(collected_data, df_struct, project_data, start_time):
     return word_buffer
 
 # --- COMPOSANT UI (rendu de la question) ---
+# utils.py - Fonction render_question (complète)
+
+# ... (Le reste du code de utils.py reste inchangé) ...
+
+# --- COMPOSANT UI (rendu de la question) ---
+# utils.py - Fonction render_question (complète et corrigée)
+# ... (N'oubliez pas les imports et le reste de votre fichier utils.py) ...
+
+# --- COMPOSANT UI (rendu de la question) ---
 def render_question(row, answers, phase_name, key_suffix, loop_index, project_data):
-    # ... (inchangé)
     """
-    Rendu d'une question dans Streamlit, avec affichage de la condition et debug.
+    Rendu d'une question dans Streamlit. Modifie le dictionnaire 'answers' en place.
+    
+    Toutes les questions de type 'number' sont désormais traitées comme des entiers.
     """
     q_id = int(row.get('id', 0))
     is_dynamic_comment = q_id == COMMENT_ID
-    
-    # LIGNE DE DÉBOGAGE : Affiche les valeurs de la condition lues par Python pour TOUTES les questions rendues.
-    # Note : Si une question est masquée par check_condition, cette fonction n'est pas appelée.
-    if not is_dynamic_comment:
-        # On utilise .get(key, '') pour s'assurer qu'une chaîne vide ou 'N/A' est affichée si la valeur est absente.
-        st.write(
-            f"DEBUG Q{q_id}: Cond. ON='{row.get('Condition on', 'N/A')}', "
-            f"Cond. VALUE='{row.get('Condition value', 'N/A')}'"
-        )
     
     if is_dynamic_comment:
         q_text = COMMENT_QUESTION
@@ -593,41 +536,17 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
         q_desc = "Ce champ est obligatoire si le nombre de photos n'est pas conforme."
         q_mandatory = True 
         q_options = []
-        condition_display = ""
     else:
         q_text = row['question']
+        # Ligne cruciale : on nettoie et met en minuscule pour une comparaison robuste
         q_type = str(row['type']).strip().lower() 
         q_desc = row['Description']
         q_mandatory = str(row['obligatoire']).lower() == 'oui'
         q_options = str(row['options']).split(',') if row['options'] else []
         
-        # --- LOGIQUE POUR L'AFFICHAGE DE LA CONDITION ---
-        condition_value = str(row.get('Condition value', '')).strip()
-        condition_on = int(row.get('Condition on', 0))
-        
-        condition_display = ""
-        if condition_on == 1 and condition_value:
-            # Nettoyer les guillemets/apostrophes pour l'affichage (si la DB les inclut)
-            display_value = condition_value.strip().strip('"').strip("'") 
-            
-            if display_value:
-                condition_display = (
-                    f'<span style="font-size: 0.8em; color: #a0a0a0; font-weight: normal; margin-left: 10px;">'
-                    f'[Condition: {display_value}]'
-                    f'</span>'
-                )
-        # ------------------------------------------------------------
-        
     q_text = str(q_text).strip()
     q_desc = str(q_desc).strip()
-    
-    # Intégration de la condition dans le label HTML
-    label_html = (
-        f"<strong>{q_id}. {q_text}</strong>" 
-        + (' <span class="mandatory">*</span>' if q_mandatory else "")
-        + condition_display
-    )
-    
+    label_html = f"<strong>{q_id}. {q_text}</strong>" + (' <span class="mandatory">*</span>' if q_mandatory else "")
     widget_key = f"q_{q_id}_{phase_name}_{key_suffix}_{loop_index}"
     current_val = answers.get(q_id)
     val = current_val
@@ -635,13 +554,15 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
     st.markdown(f'<div class="question-card"><div>{label_html}</div>', unsafe_allow_html=True)
     if q_desc: st.markdown(f'<div class="description">⚠️ {q_desc}</div>', unsafe_allow_html=True)
     
-    # Éléments de formulaire
+    # Étape de débogage temporaire : 
+    # st.write(f"DEBUG: Q_ID={q_id}, Q_TYPE='{q_type}'") 
+
     if q_type == 'text':
         default_val = current_val if current_val else ""
         if is_dynamic_comment:
-            val = st.text_area("Justification de l'écart", value=default_val, key=widget_key, label_visibility="collapsed")
+             val = st.text_area("Justification de l'écart", value=default_val, key=widget_key, label_visibility="collapsed")
         else:
-            val = st.text_input("Réponse", value=default_val, key=widget_key, label_visibility="collapsed")
+             val = st.text_input("Réponse", value=default_val, key=widget_key, label_visibility="collapsed")
 
     elif q_type == 'select':
         clean_opts = [opt.strip() for opt in q_options]
@@ -649,10 +570,12 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
         idx = clean_opts.index(current_val) if current_val in clean_opts else 0
         val = st.selectbox("Sélection", clean_opts, index=idx, key=widget_key, label_visibility="collapsed")
     
-    elif q_type == 'number':
+    # --- LOGIQUE AUTOMATIQUE POUR NUMBER (FORCÉ EN ENTIER) ---
+    elif q_type == 'number': # Cette condition doit être TRUE
+        
         label = "Nombre (Entier)"
+        # On s'assure que la valeur par défaut est un entier (0 si invalide)
         try:
-            # Rendre la lecture par défaut plus robuste
             default_val = int(float(current_val)) if current_val is not None and str(current_val).replace('.', '', 1).isdigit() else 0
         except:
             default_val = 0
@@ -660,18 +583,19 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
         val = st.number_input(
             label, 
             value=default_val, 
-            step=1, 
-            format="%d", 
+            step=1,             # <-- LIGNE CRUCIALE : Force le pas de 1
+            format="%d",         # <-- LIGNE CRUCIALE : Force l'affichage entier
             key=widget_key, 
             label_visibility="collapsed"
         )
+    # --------------------------------------------------------
     
     elif q_type == 'photo':
         expected, details = get_expected_photo_count(phase_name.strip(), project_data)
         if expected is not None and expected > 0:
             st.info(f"📸 **Photos :** Il est attendu **{expected}** photos pour cette section (Base calculée : {details}).")
             st.divider()
-            
+        
         file_uploader_default = current_val if isinstance(current_val, list) else []
 
         val = st.file_uploader("Images", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True, key=widget_key, label_visibility="collapsed")
@@ -683,14 +607,13 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
             val = file_uploader_default
             names = ", ".join([getattr(f, 'name', 'Fichier') for f in val])
             st.info(f"Fichiers conservés : {len(val)} ({names})")
-            
+        
     st.markdown('</div>', unsafe_allow_html=True)
     
     # Mise à jour des réponses dans le dictionnaire 'answers'
     if val is not None and (not is_dynamic_comment or str(val).strip() != ""): 
         if q_type == 'number':
-            # S'assure que les valeurs numériques sont stockées comme int dans answers
-            answers[q_id] = int(val) 
+             answers[q_id] = int(val) # <-- LIGNE CRUCIALE : Force le stockage en entier
         else:
             answers[q_id] = val 
     elif current_val is not None and not is_dynamic_comment: 
