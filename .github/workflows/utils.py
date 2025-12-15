@@ -1,4 +1,4 @@
-# utils.py (Version Corrigée et Optimisée)
+# utils.py (Version Finale avec gestion ET/OU et debug)
 import streamlit as st
 import pandas as pd
 import uuid
@@ -16,8 +16,6 @@ from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.table import WD_ALIGN_VERTICAL
 
 # --- CONSTANTES ---
-# ... (inchangé)
-
 PROJECT_RENAME_MAP = {
     'Intitulé': 'Intitulé',
     'Fournisseur Bornes AC [Bornes]': 'Fournisseur Bornes AC',
@@ -91,7 +89,7 @@ def load_form_structure_from_firestore():
         df = pd.DataFrame(data)
         df.columns = df.columns.str.strip()
         
-        # Normalisation des noms de colonnes
+        # Normalisation des noms de colonnes (résout les problèmes de typo)
         rename_map = {'Conditon value': 'Condition value', 'condition value': 'Condition value', 'Condition Value': 'Condition value', 'Condition': 'Condition value', 'Conditon on': 'Condition on', 'condition on': 'Condition on'}
         actual_rename = {k: v for k, v in rename_map.items() if k in df.columns}
         df = df.rename(columns=actual_rename)
@@ -104,12 +102,7 @@ def load_form_structure_from_firestore():
         df['options'] = df['options'].fillna('')
         df['Description'] = df['Description'].fillna('')
         df['Condition value'] = df['Condition value'].fillna('')
-
-        # 🚀 CORRECTION MAJEURE : Assurer que 'Condition on' est un entier (1 ou 0)
-        # La valeur est chargée en tant que Number (float 1.0) et non String.
-        # to_numeric permet de convertir 1.0 en float, puis fillna(0) gère les NaN,
-        # et astype(int) finalise la conversion.
-        df['Condition on'] = pd.to_numeric(df['Condition on'], errors='coerce').fillna(0).astype(int)
+        df['Condition on'] = df['Condition on'].apply(lambda x: int(x) if pd.notna(x) and str(x).isdigit() else 0)
         
         for col in df.select_dtypes(include=['object']).columns:
             df[col] = df[col].astype(str).str.strip()
@@ -124,7 +117,6 @@ def load_form_structure_from_firestore():
 
 @st.cache_data(ttl=3600)
 def load_site_data_from_firestore():
-    # ... (inchangé)
     """Charge les données des sites depuis la collection 'Sites'."""
     try:
         docs = db.collection('Sites').get()
@@ -140,7 +132,6 @@ def load_site_data_from_firestore():
 # --- LOGIQUE MÉTIER ---
 
 def get_expected_photo_count(section_name, project_data):
-    # ... (inchangé)
     """Calcule le nombre de photos attendues pour une section donnée."""
     if section_name.strip() not in SECTION_PHOTO_RULES:
         return None, None 
@@ -168,7 +159,6 @@ def get_expected_photo_count(section_name, project_data):
     return total_expected, detail_str
 
 def evaluate_single_condition(condition_str, all_answers):
-    # ... (inchangé)
     """
     Évalue une condition unitaire de type 'ID = Valeur'.
     Retourne True si la condition est respectée, False sinon.
@@ -194,19 +184,14 @@ def evaluate_single_condition(condition_str, all_answers):
         return True # En cas d'erreur de parsing, on affiche par sécurité
 
 def check_condition(row, current_answers, collected_data):
-    # ... (inchangé, fonctionne correctement après la correction de la lecture)
     """
     Vérifie si une question doit être affichée en fonction des réponses précédentes.
     Gère les opérateurs 'ET' et 'OU'.
     """
     try:
-        # Après la correction de load_form_structure_from_firestore, 
-        # row.get('Condition on', 0) est garanti d'être 1 ou 0.
+        # Si 'Condition on' n'est pas 1, la condition est inactive -> on affiche
         if int(row.get('Condition on', 0)) != 1: return True
-    except (ValueError, TypeError): 
-        # Cette exception ne devrait plus survenir si la DB est bien typée, 
-        # mais on la garde par sécurité.
-        return True
+    except (ValueError, TypeError): return True
 
     # Consolidation de toutes les réponses (passées et actuelles)
     all_past_answers = {}
@@ -240,7 +225,6 @@ def check_condition(row, current_answers, collected_data):
 
 
 def validate_section(df_questions, section_name, answers, collected_data, project_data):
-    # ... (inchangé)
     """Valide les réponses d'une section, y compris le compte de photos si applicable."""
     missing = []
     section_rows = df_questions[df_questions['section'] == section_name]
@@ -333,7 +317,7 @@ def save_form_data(collected_data, project_data, submission_id, start_time):
                     clean_phase["answers"][str(k)] = f"Fichiers (non stockés en DB): {file_names}"
                 
                 elif hasattr(v, 'read'): 
-                    clean_phase["answers"][str(k)] = f"Fichier (non stocké en DB): {v.name}"
+                     clean_phase["answers"][str(k)] = f"Fichier (non stocké en DB): {v.name}"
                 else:
                     clean_phase["answers"][str(k)] = v
             
@@ -527,21 +511,21 @@ def create_word_report(collected_data, df_struct, project_data, start_time):
             if is_photo_answer:
                 doc.add_paragraph(f'Q{q_id}: {q_text}', style='Report Subtitle')
                 if isinstance(answer, list):
-                    doc.add_paragraph(f'Nombre de photos: {len(answer)}', style='Report Text')
-                    for idx, file_obj in enumerate(answer):
-                        try:
-                            file_obj.seek(0)
-                            image_data = file_obj.read()
-                            if image_data:
-                                image_stream = io.BytesIO(image_data)
-                                doc.add_picture(image_stream, width=Inches(5)) 
-                                caption = doc.add_paragraph(f'Photo {idx+1}: {file_obj.name}', style='Report Text')
-                                caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                caption.runs[0].font.size = Pt(9)
-                                caption.runs[0].font.italic = True
-                                file_obj.seek(0)
-                            except Exception as e:
-                                doc.add_paragraph(f'[Erreur photo {idx+1}: {e}]', style='Report Text')
+                     doc.add_paragraph(f'Nombre de photos: {len(answer)}', style='Report Text')
+                     for idx, file_obj in enumerate(answer):
+                         try:
+                             file_obj.seek(0)
+                             image_data = file_obj.read()
+                             if image_data:
+                                 image_stream = io.BytesIO(image_data)
+                                 doc.add_picture(image_stream, width=Inches(5)) 
+                                 caption = doc.add_paragraph(f'Photo {idx+1}: {file_obj.name}', style='Report Text')
+                                 caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                 caption.runs[0].font.size = Pt(9)
+                                 caption.runs[0].font.italic = True
+                                 file_obj.seek(0)
+                         except Exception as e:
+                             doc.add_paragraph(f'[Erreur photo {idx+1}: {e}]', style='Report Text')
                 doc.add_paragraph()
 
             # 2. Traitement des autres types de réponses (texte, nombre, select)
@@ -571,7 +555,6 @@ def create_word_report(collected_data, df_struct, project_data, start_time):
 
 # --- COMPOSANT UI (rendu de la question) ---
 def render_question(row, answers, phase_name, key_suffix, loop_index, project_data):
-    # ... (inchangé)
     """
     Rendu d'une question dans Streamlit, avec affichage de la condition et debug.
     """
@@ -607,7 +590,7 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
         
         condition_display = ""
         if condition_on == 1 and condition_value:
-            # Nettoyer les guillemets/apostrophes pour l'affichage (si la DB les inclut)
+             # Nettoyer les guillemets/apostrophes pour l'affichage (si la DB les inclut)
             display_value = condition_value.strip().strip('"').strip("'") 
             
             if display_value:
@@ -639,9 +622,9 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
     if q_type == 'text':
         default_val = current_val if current_val else ""
         if is_dynamic_comment:
-            val = st.text_area("Justification de l'écart", value=default_val, key=widget_key, label_visibility="collapsed")
+             val = st.text_area("Justification de l'écart", value=default_val, key=widget_key, label_visibility="collapsed")
         else:
-            val = st.text_input("Réponse", value=default_val, key=widget_key, label_visibility="collapsed")
+             val = st.text_input("Réponse", value=default_val, key=widget_key, label_visibility="collapsed")
 
     elif q_type == 'select':
         clean_opts = [opt.strip() for opt in q_options]
@@ -652,7 +635,6 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
     elif q_type == 'number':
         label = "Nombre (Entier)"
         try:
-            # Rendre la lecture par défaut plus robuste
             default_val = int(float(current_val)) if current_val is not None and str(current_val).replace('.', '', 1).isdigit() else 0
         except:
             default_val = 0
@@ -660,8 +642,8 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
         val = st.number_input(
             label, 
             value=default_val, 
-            step=1, 
-            format="%d", 
+            step=1,             
+            format="%d",         
             key=widget_key, 
             label_visibility="collapsed"
         )
@@ -671,7 +653,7 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
         if expected is not None and expected > 0:
             st.info(f"📸 **Photos :** Il est attendu **{expected}** photos pour cette section (Base calculée : {details}).")
             st.divider()
-            
+        
         file_uploader_default = current_val if isinstance(current_val, list) else []
 
         val = st.file_uploader("Images", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True, key=widget_key, label_visibility="collapsed")
@@ -683,14 +665,13 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
             val = file_uploader_default
             names = ", ".join([getattr(f, 'name', 'Fichier') for f in val])
             st.info(f"Fichiers conservés : {len(val)} ({names})")
-            
+        
     st.markdown('</div>', unsafe_allow_html=True)
     
     # Mise à jour des réponses dans le dictionnaire 'answers'
     if val is not None and (not is_dynamic_comment or str(val).strip() != ""): 
         if q_type == 'number':
-            # S'assure que les valeurs numériques sont stockées comme int dans answers
-            answers[q_id] = int(val) 
+             answers[q_id] = int(val) 
         else:
             answers[q_id] = val 
     elif current_val is not None and not is_dynamic_comment: 
