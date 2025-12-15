@@ -579,12 +579,12 @@ def render_question(row, answers, phase_name, key_suffix, loop_index, project_da
     
     # LIGNE DE DÉBOGAGE : Affiche les valeurs de la condition lues par Python pour TOUTES les questions rendues.
     # Note : Si une question est masquée par check_condition, cette fonction n'est pas appelée.
-    if not is_dynamic_comment:
+    #if not is_dynamic_comment:
         # On utilise .get(key, '') pour s'assurer qu'une chaîne vide ou 'N/A' est affichée si la valeur est absente.
-        st.write(
-            f"DEBUG Q{q_id}: Cond. ON='{row.get('Condition on', 'N/A')}', "
-            f"Cond. VALUE='{row.get('Condition value', 'N/A')}'"
-        )
+        #st.write(
+            #f"DEBUG Q{q_id}: Cond. ON='{row.get('Condition on', 'N/A')}', "
+            #f"Cond. VALUE='{row.get('Condition value', 'N/A')}'"
+        #)
     
     if is_dynamic_comment:
         q_text = COMMENT_QUESTION
