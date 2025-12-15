@@ -5,6 +5,7 @@ import urllib.parse
 from datetime import datetime
 
 # Import des fonctions et constantes depuis utils.py
+# (Assurez-vous que utils.py est dans le même répertoire)
 import utils
 
 # --- CONFIGURATION ET STYLE ---
@@ -46,7 +47,7 @@ def init_session_state():
         'show_comment_on_error': False,
         'df_struct': None,
         'df_site': None,
-        'last_validation_errors': None # <-- AJOUT : Pour stocker les erreurs entre les reruns
+        'last_validation_errors': None 
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -63,7 +64,7 @@ if st.session_state['step'] == 'PROJECT_LOAD':
     st.info("Tentative de chargement de la structure des formulaires...")
     with st.spinner("Chargement en cours..."):
         df_struct = utils.load_form_structure_from_firestore()
-        utils.load_site_data_from_firestore.clear() # Clear le cache pour éviter les problèmes si les sites changent
+        utils.load_site_data_from_firestore.clear() 
         df_site = utils.load_site_data_from_firestore()
         
         if df_struct is not None and df_site is not None:
@@ -74,7 +75,6 @@ if st.session_state['step'] == 'PROJECT_LOAD':
         else:
             st.error("Impossible de charger les données. Vérifiez votre connexion et les secrets Firebase.")
             if st.button("Réessayer le chargement"):
-                # Clear le cache pour forcer le re-téléchargement des données
                 utils.load_form_structure_from_firestore.clear() 
                 utils.load_site_data_from_firestore.clear() 
                 st.session_state['step'] = 'PROJECT_LOAD'
@@ -114,7 +114,7 @@ elif st.session_state['step'] == 'PROJECT':
                 st.session_state['current_phase_temp'] = {}
                 st.session_state['iteration_id'] = str(uuid.uuid4())
                 st.session_state['show_comment_on_error'] = False
-                st.session_state['last_validation_errors'] = None # <-- NOUVEAU: Réinitialisation des erreurs
+                st.session_state['last_validation_errors'] = None
                 st.rerun()
 
 # 3. IDENTIFICATION
@@ -123,7 +123,6 @@ elif st.session_state['step'] == 'IDENTIFICATION':
     ID_SECTION_NAME = df['section'].iloc[0]
     st.markdown(f"### 👤 Étape unique : {ID_SECTION_NAME}")
     
-    # --- DÉBUT MODIFICATION IDENTIFICATION ---
     identification_questions = df[df['section'] == ID_SECTION_NAME].copy()
     
     # 1. Assurer que l'ID est numérique
@@ -131,7 +130,6 @@ elif st.session_state['step'] == 'IDENTIFICATION':
     
     # 2. Trier par ID numérique croissant pour la logique conditionnelle
     identification_questions = identification_questions.sort_values(by='id_temp')
-    # --- FIN MODIFICATION IDENTIFICATION ---
 
     if st.session_state['id_rendering_ident'] is None: st.session_state['id_rendering_ident'] = str(uuid.uuid4())
     rendering_id = st.session_state['id_rendering_ident']
@@ -152,7 +150,17 @@ elif st.session_state['step'] == 'IDENTIFICATION':
     st.markdown("---")
     if st.button("✅ Valider l'identification"):
         st.session_state['last_validation_errors'] = None # Réinitialisation à la tentative de validation
-        is_valid, errors = utils.validate_section(df, ID_SECTION_NAME, st.session_state['current_phase_temp'], st.session_state['collected_data'], st.session_state['project_data'])
+        
+        # --- CORRECTION ROBUSTESSE IDENTIFICATION ---
+        df_struct = st.session_state.get('df_struct')
+        if df_struct is None:
+            st.error("Structure du formulaire manquante. Veuillez recharger le projet.")
+            st.experimental_rerun()
+            # Utilisation de st.experimental_rerun() pour rafraîchir et afficher l'erreur immédiatement.
+            # Le 'return' n'est pas nécessaire ici car rerun arrête l'exécution.
+        # -------------------------------------------
+        
+        is_valid, errors = utils.validate_section(df_struct, ID_SECTION_NAME, st.session_state['current_phase_temp'], st.session_state['collected_data'], st.session_state['project_data'])
         if is_valid:
             id_entry = {"phase_name": ID_SECTION_NAME, "answers": st.session_state['current_phase_temp'].copy()}
             st.session_state['collected_data'].append(id_entry)
@@ -160,15 +168,13 @@ elif st.session_state['step'] == 'IDENTIFICATION':
             st.session_state['step'] = 'LOOP_DECISION'
             st.session_state['current_phase_temp'] = {}
             st.session_state['show_comment_on_error'] = False
-            st.session_state['last_validation_errors'] = None # Réinitialisation en cas de succès
+            st.session_state['last_validation_errors'] = None 
             st.success("Identification validée.")
             st.rerun()
         else:
-            # Stockage de l'erreur au lieu de l'affichage direct + suppression du rerun
             html_errors = '<br>'.join([f"- {e}" for e in errors])
             st.session_state['last_validation_errors'] = html_errors
-            # st.rerun() n'est pas appelé ici pour permettre l'affichage des erreurs persistantes
-            st.experimental_rerun() # Utiliser experimental_rerun pour forcer la mise à jour de la page
+            st.experimental_rerun() 
 
 # 4. BOUCLE PHASES
 elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
@@ -219,7 +225,7 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                 st.session_state['current_phase_name'] = None
                 st.session_state['iteration_id'] = str(uuid.uuid4())
                 st.session_state['show_comment_on_error'] = False
-                st.session_state['last_validation_errors'] = None # Réinitialisation
+                st.session_state['last_validation_errors'] = None
                 st.rerun()
         with col2:
             if st.button("🏁 Terminer l'audit"):
@@ -245,13 +251,13 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
               if phase_choice:
                   st.session_state['current_phase_name'] = phase_choice
                   st.session_state['show_comment_on_error'] = False 
-                  st.session_state['last_validation_errors'] = None # Réinitialisation
+                    st.session_state['last_validation_errors'] = None
                   st.rerun()
               if st.button("⬅️ Retour"):
                   st.session_state['step'] = 'LOOP_DECISION'
                   st.session_state['current_phase_temp'] = {}
                   st.session_state['show_comment_on_error'] = False
-                  st.session_state['last_validation_errors'] = None # Réinitialisation
+                    st.session_state['last_validation_errors'] = None
                   st.rerun()
         else:
             current_phase = st.session_state['current_phase_name']
@@ -261,26 +267,18 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                 st.session_state['current_phase_temp'] = {}
                 st.session_state['iteration_id'] = str(uuid.uuid4())
                 st.session_state['show_comment_on_error'] = False
-                st.session_state['last_validation_errors'] = None # Réinitialisation
+                st.session_state['last_validation_errors'] = None
                 st.rerun()
             st.divider()
             
-            # --- DÉBUT MODIFICATION BOUCLE PHASE ---
             section_questions = df[df['section'] == current_phase].copy()
-            
-            # 1. Assurer que l'ID est numérique
             section_questions['id_temp'] = pd.to_numeric(section_questions['id'], errors='coerce').fillna(0)
-            
-            # 2. Trier par ID numérique croissant pour la logique conditionnelle
             section_questions = section_questions.sort_values(by='id_temp')
-            # --- FIN MODIFICATION BOUCLE PHASE ---
 
             visible_count = 0
             for idx, (index, row) in enumerate(section_questions.iterrows()):
                 if int(row.get('id', 0)) == utils.COMMENT_ID: continue
                 
-                # La vérification utils.check_condition est désormais fiable car
-                # les questions parentes ont été traitées avant.
                 if utils.check_condition(row, st.session_state['current_phase_temp'], st.session_state['collected_data']):
                     utils.render_question(row, st.session_state['current_phase_temp'], current_phase, st.session_state['iteration_id'], idx, st.session_state['project_data'])
                     visible_count += 1
@@ -291,7 +289,6 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
             if st.session_state.get('show_comment_on_error', False):
                 st.markdown("---")
                 st.markdown("### ✍️ Justification de l'Écart")
-                # Crée une ligne 'fantôme' pour la question de commentaire
                 comment_row = pd.Series({'id': utils.COMMENT_ID, 'type': 'text'}) 
                 utils.render_question(comment_row, st.session_state['current_phase_temp'], current_phase, st.session_state['iteration_id'], 999, st.session_state['project_data']) 
             
@@ -310,25 +307,22 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                     st.session_state['step'] = 'LOOP_DECISION'
                     st.session_state['current_phase_temp'] = {}
                     st.session_state['show_comment_on_error'] = False
-                    st.session_state['last_validation_errors'] = None # Réinitialisation
+                    st.session_state['last_validation_errors'] = None
                     st.rerun()
-# app.py (dans le bloc elif st.session_state['step'] == 'FILL_PHASE':, sous 'with c2:')
-
             with c2:
                 if st.button("💾 Valider la phase"):
                     st.session_state['show_comment_on_error'] = False
-                    st.session_state['last_validation_errors'] = None # Réinitialisation à la tentative de validation
-                    
-                    # --- NOUVEAU: Utiliser une variable locale pour les DataFrames 
+                    st.session_state['last_validation_errors'] = None
+
+                    # --- CORRECTION ROBUSTESSE PHASE (Celle qui cause l'erreur) ---
                     df_struct = st.session_state.get('df_struct')
                     if df_struct is None:
                         st.error("Structure du formulaire manquante. Veuillez recharger le projet.")
-                        # Ne pas appeler rerun ici, sinon cela boucle sur l'erreur
-                        # st.rerun() 
-                        return # Arrête l'exécution de la validation
-
+                        st.experimental_rerun()
+                    # -------------------------------------------------------------
+                    
                     is_valid, errors = utils.validate_section(
-                        df_struct, # <-- Utiliser df_struct local et vérifié
+                        df_struct, # Utiliser la variable locale vérifiée
                         current_phase, 
                         st.session_state['current_phase_temp'], 
                         st.session_state['collected_data'], 
@@ -336,7 +330,6 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                     )
                     
                     if is_valid:
-                        # ... (Succès, pas de changement)
                         new_entry = {"phase_name": current_phase, "answers": st.session_state['current_phase_temp'].copy()}
                         st.session_state['collected_data'].append(new_entry)
                         st.success("Phase validée et enregistrée !")
@@ -344,7 +337,7 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                         st.session_state['last_validation_errors'] = None
                         st.rerun()
                     else:
-                        # ... (Gestion des erreurs, pas de changement ici)
+                        # Vérifie si l'erreur est liée au manque de justification pour les photos
                         is_photo_error = any(f"Commentaire (ID {utils.COMMENT_ID})" in e for e in errors)
                         if is_photo_error: st.session_state['show_comment_on_error'] = True
                         
