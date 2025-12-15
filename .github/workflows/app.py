@@ -5,7 +5,6 @@ import urllib.parse
 from datetime import datetime
 
 # Import des fonctions et constantes depuis utils.py
-# (Ce fichier est importé soit localement, soit via le package GitHub)
 import utils
 
 # --- CONFIGURATION ET STYLE ---
@@ -46,7 +45,8 @@ def init_session_state():
         'submission_id': None,
         'show_comment_on_error': False,
         'df_struct': None,
-        'df_site': None
+        'df_site': None,
+        'last_validation_errors': None # <-- AJOUT : Pour stocker les erreurs entre les reruns
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -65,7 +65,7 @@ if st.session_state['step'] == 'PROJECT_LOAD':
         df_struct = utils.load_form_structure_from_firestore()
         utils.load_site_data_from_firestore.clear() # Clear le cache pour éviter les problèmes si les sites changent
         df_site = utils.load_site_data_from_firestore()
-       
+        
         if df_struct is not None and df_site is not None:
             st.session_state['df_struct'] = df_struct
             st.session_state['df_site'] = df_site
@@ -84,14 +84,14 @@ if st.session_state['step'] == 'PROJECT_LOAD':
 elif st.session_state['step'] == 'PROJECT':
     df_site = st.session_state['df_site']
     st.markdown("### 🏗️ Sélection du Chantier")
-   
+    
     if 'Intitulé' not in df_site.columns:
         st.error("Colonne 'Intitulé' manquante dans les données 'Sites'.")
     else:
         search_term = st.text_input("Rechercher un projet (Veuillez renseigner au minimum 3 caractères pour le nom de la ville)", key="project_search_input").strip()
         filtered_projects = []
         selected_proj = None
-       
+        
         if len(search_term) >= 3:
             mask = df_site['Intitulé'].str.contains(search_term, case=False, na=False)
             filtered_projects_df = df_site[mask]
@@ -102,7 +102,7 @@ elif st.session_state['step'] == 'PROJECT':
                 st.warning(f"Aucun projet trouvé pour **'{search_term}'**.")
         elif len(search_term) > 0 and len(search_term) < 3:
             st.info("Veuillez entrer au moins **3 caractères** pour lancer la recherche.")
-       
+        
         if selected_proj:
             row = df_site[df_site['Intitulé'] == selected_proj].iloc[0]
             st.info(f"Projet sélectionné : **{selected_proj}**")
@@ -114,6 +114,7 @@ elif st.session_state['step'] == 'PROJECT':
                 st.session_state['current_phase_temp'] = {}
                 st.session_state['iteration_id'] = str(uuid.uuid4())
                 st.session_state['show_comment_on_error'] = False
+                st.session_state['last_validation_errors'] = None # <-- NOUVEAU: Réinitialisation des erreurs
                 st.rerun()
 
 # 3. IDENTIFICATION
@@ -121,26 +122,36 @@ elif st.session_state['step'] == 'IDENTIFICATION':
     df = st.session_state['df_struct']
     ID_SECTION_NAME = df['section'].iloc[0]
     st.markdown(f"### 👤 Étape unique : {ID_SECTION_NAME}")
-   
+    
     # --- DÉBUT MODIFICATION IDENTIFICATION ---
     identification_questions = df[df['section'] == ID_SECTION_NAME].copy()
-   
+    
     # 1. Assurer que l'ID est numérique
     identification_questions['id_temp'] = pd.to_numeric(identification_questions['id'], errors='coerce').fillna(0)
-   
+    
     # 2. Trier par ID numérique croissant pour la logique conditionnelle
     identification_questions = identification_questions.sort_values(by='id_temp')
     # --- FIN MODIFICATION IDENTIFICATION ---
 
     if st.session_state['id_rendering_ident'] is None: st.session_state['id_rendering_ident'] = str(uuid.uuid4())
     rendering_id = st.session_state['id_rendering_ident']
-   
+    
     for idx, (index, row) in enumerate(identification_questions.iterrows()):
         if utils.check_condition(row, st.session_state['current_phase_temp'], st.session_state['collected_data']):
             utils.render_question(row, st.session_state['current_phase_temp'], ID_SECTION_NAME, rendering_id, idx, st.session_state['project_data'])
-           
+            
+
+    # --- AFFICHAGE PERSISTANT DES ERREURS DE VALIDATION (IDENTIFICATION) ---
+    if st.session_state['last_validation_errors']:
+        st.markdown(
+            f'<div class="error-box"><b>⚠️ Erreur de validation :</b><br>Les questions suivantes nécessitent une réponse ou une correction :<br>{st.session_state["last_validation_errors"]}</div>', 
+            unsafe_allow_html=True
+        )
+    # ------------------------------------------------------------------------
+
     st.markdown("---")
     if st.button("✅ Valider l'identification"):
+        st.session_state['last_validation_errors'] = None # Réinitialisation à la tentative de validation
         is_valid, errors = utils.validate_section(df, ID_SECTION_NAME, st.session_state['current_phase_temp'], st.session_state['collected_data'], st.session_state['project_data'])
         if is_valid:
             id_entry = {"phase_name": ID_SECTION_NAME, "answers": st.session_state['current_phase_temp'].copy()}
@@ -149,12 +160,15 @@ elif st.session_state['step'] == 'IDENTIFICATION':
             st.session_state['step'] = 'LOOP_DECISION'
             st.session_state['current_phase_temp'] = {}
             st.session_state['show_comment_on_error'] = False
+            st.session_state['last_validation_errors'] = None # Réinitialisation en cas de succès
             st.success("Identification validée.")
             st.rerun()
         else:
-            # MODIFICATION POUR UN MESSAGE PLUS EXPLICITE
+            # Stockage de l'erreur au lieu de l'affichage direct + suppression du rerun
             html_errors = '<br>'.join([f"- {e}" for e in errors])
-            st.markdown(f'<div class="error-box"><b>⚠️ Erreur de validation :</b><br>Les questions suivantes nécessitent une réponse ou une correction :<br>{html_errors}</div>', unsafe_allow_html=True)
+            st.session_state['last_validation_errors'] = html_errors
+            # st.rerun() n'est pas appelé ici pour permettre l'affichage des erreurs persistantes
+            st.experimental_rerun() # Utiliser experimental_rerun pour forcer la mise à jour de la page
 
 # 4. BOUCLE PHASES
 elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
@@ -162,7 +176,7 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
     with st.expander(f"📍 Projet : {project_intitule}", expanded=False):
         project_details = st.session_state['project_data']
         st.markdown(":orange-badge[**Détails du Projet sélectionné :**]")
-       
+        
         # Affichage des détails du projet (récupéré des données 'Sites')
         with st.container(border=True):
             st.markdown("**Informations générales**")
@@ -172,7 +186,7 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                 renamed_key = utils.PROJECT_RENAME_MAP.get(field_key, field_key)
                 value = project_details.get(field_key, 'N/A')
                 with cols1[i]: st.markdown(f"**{renamed_key}** : {value}")
-                   
+                    
         with st.container(border=True):
             st.markdown("**Points de charge Standard**")
             cols2 = st.columns([1, 1, 1])
@@ -190,7 +204,7 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                 renamed_key = utils.PROJECT_RENAME_MAP.get(field_key, field_key)
                 value = project_details.get(field_key, 'N/A')
                 with cols3[i]: st.markdown(f"**{renamed_key}** : {value}")
-       
+        
         st.write(":orange-badge[**Phases et Identification déjà complétées :**]")
         for idx, item in enumerate(st.session_state['collected_data']):
             st.write(f"• **{item['phase_name']}** : {len(item['answers'])} réponses")
@@ -205,6 +219,7 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                 st.session_state['current_phase_name'] = None
                 st.session_state['iteration_id'] = str(uuid.uuid4())
                 st.session_state['show_comment_on_error'] = False
+                st.session_state['last_validation_errors'] = None # Réinitialisation
                 st.rerun()
         with col2:
             if st.button("🏁 Terminer l'audit"):
@@ -223,18 +238,20 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
         for sec in all_sections_raw:
             if pd.isna(sec) or not sec or str(sec).strip().lower() in SECTIONS_TO_EXCLUDE_CLEAN: continue
             available_phases.append(sec)
-       
+        
         if not st.session_state['current_phase_name']:
               st.markdown("### 📑 Sélection de la phase")
               phase_choice = st.selectbox("Quelle phase ?", [""] + available_phases)
               if phase_choice:
                   st.session_state['current_phase_name'] = phase_choice
                   st.session_state['show_comment_on_error'] = False 
+                    st.session_state['last_validation_errors'] = None # Réinitialisation
                   st.rerun()
               if st.button("⬅️ Retour"):
                   st.session_state['step'] = 'LOOP_DECISION'
                   st.session_state['current_phase_temp'] = {}
                   st.session_state['show_comment_on_error'] = False
+                    st.session_state['last_validation_errors'] = None # Réinitialisation
                   st.rerun()
         else:
             current_phase = st.session_state['current_phase_name']
@@ -243,16 +260,17 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                 st.session_state['current_phase_name'] = None
                 st.session_state['current_phase_temp'] = {}
                 st.session_state['iteration_id'] = str(uuid.uuid4())
-                st.session_state['show_comment_on_error'] = False 
+                st.session_state['show_comment_on_error'] = False
+                st.session_state['last_validation_errors'] = None # Réinitialisation
                 st.rerun()
             st.divider()
-           
+            
             # --- DÉBUT MODIFICATION BOUCLE PHASE ---
             section_questions = df[df['section'] == current_phase].copy()
-           
+            
             # 1. Assurer que l'ID est numérique
             section_questions['id_temp'] = pd.to_numeric(section_questions['id'], errors='coerce').fillna(0)
-           
+            
             # 2. Trier par ID numérique croissant pour la logique conditionnelle
             section_questions = section_questions.sort_values(by='id_temp')
             # --- FIN MODIFICATION BOUCLE PHASE ---
@@ -260,13 +278,13 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
             visible_count = 0
             for idx, (index, row) in enumerate(section_questions.iterrows()):
                 if int(row.get('id', 0)) == utils.COMMENT_ID: continue
-               
+                
                 # La vérification utils.check_condition est désormais fiable car
                 # les questions parentes ont été traitées avant.
                 if utils.check_condition(row, st.session_state['current_phase_temp'], st.session_state['collected_data']):
                     utils.render_question(row, st.session_state['current_phase_temp'], current_phase, st.session_state['iteration_id'], idx, st.session_state['project_data'])
                     visible_count += 1
-           
+            
             if visible_count == 0 and not st.session_state.get('show_comment_on_error', False):
                 st.warning("Aucune question visible dans cette phase.")
 
@@ -276,7 +294,15 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                 # Crée une ligne 'fantôme' pour la question de commentaire
                 comment_row = pd.Series({'id': utils.COMMENT_ID, 'type': 'text'}) 
                 utils.render_question(comment_row, st.session_state['current_phase_temp'], current_phase, st.session_state['iteration_id'], 999, st.session_state['project_data']) 
-           
+            
+            # --- AFFICHAGE PERSISTANT DES ERREURS DE VALIDATION (PHASE) ---
+            if st.session_state['last_validation_errors']:
+                st.markdown(
+                    f'<div class="error-box"><b>⚠️ Erreurs :</b><br>Les questions suivantes nécessitent une réponse ou une correction :<br>{st.session_state["last_validation_errors"]}</div>', 
+                    unsafe_allow_html=True
+                )
+            # ------------------------------------------------------------------------
+
             st.markdown("---")
             c1, c2 = st.columns([1, 2])
             with c1:
@@ -284,26 +310,32 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                     st.session_state['step'] = 'LOOP_DECISION'
                     st.session_state['current_phase_temp'] = {}
                     st.session_state['show_comment_on_error'] = False
+                    st.session_state['last_validation_errors'] = None # Réinitialisation
                     st.rerun()
             with c2:
                 if st.button("💾 Valider la phase"):
-                    st.session_state['show_comment_on_error'] = False 
+                    st.session_state['show_comment_on_error'] = False
+                    st.session_state['last_validation_errors'] = None # Réinitialisation à la tentative de validation
+                    
                     is_valid, errors = utils.validate_section(df, current_phase, st.session_state['current_phase_temp'], st.session_state['collected_data'], st.session_state['project_data'])
+                    
                     if is_valid:
                         new_entry = {"phase_name": current_phase, "answers": st.session_state['current_phase_temp'].copy()}
                         st.session_state['collected_data'].append(new_entry)
                         st.success("Phase validée et enregistrée !")
                         st.session_state['step'] = 'LOOP_DECISION'
+                        st.session_state['last_validation_errors'] = None # Réinitialisation en cas de succès
                         st.rerun()
                     else:
                         # Vérifie si l'erreur est liée au manque de justification pour les photos
                         is_photo_error = any(f"Commentaire (ID {utils.COMMENT_ID})" in e for e in errors)
                         if is_photo_error: st.session_state['show_comment_on_error'] = True
                         
-                        # MODIFICATION POUR UN MESSAGE PLUS EXPLICITE
+                        # Stockage de l'erreur au lieu de l'affichage direct + suppression du rerun
                         html_errors = '<br>'.join([f"- {e}" for e in errors])
-                        st.markdown(f'<div class="error-box"><b>⚠️ Erreurs :</b><br>Les questions suivantes nécessitent une réponse ou une correction :<br>{html_errors}</div>', unsafe_allow_html=True)
-                        st.rerun()
+                        st.session_state['last_validation_errors'] = html_errors
+                        # st.rerun() est remplacé par experimental_rerun pour rafraichir l'affichage
+                        st.experimental_rerun() 
             st.markdown('</div>', unsafe_allow_html=True)
 
 # 5. FIN / EXPORTS
@@ -312,8 +344,8 @@ elif st.session_state['step'] == 'FINISHED':
     project_name = st.session_state['project_data'].get('Intitulé', 'Projet Inconnu')
     st.write(f"Projet : **{project_name}**")
     st.warning('Il est attendu que vous téléchargiez le rapport Word ci-dessous pour le transmettre à votre interlocuteur.', icon="⚠️")
-   
-   
+    
+    
     # 1. SAUVEGARDE FIREBASE
     if not st.session_state['data_saved']:
         with st.spinner("Sauvegarde des réponses dans Firestore..."):
@@ -345,12 +377,12 @@ elif st.session_state['step'] == 'FINISHED':
         )
         zip_buffer = utils.create_zip_export(st.session_state['collected_data'])
         date_str = datetime.now().strftime('%Y%m%d_%H%M')
-       
+        
         # --- 2. TÉLÉCHARGEMENT DIRECT ---
         st.markdown("### 📥 Télécharger les fichiers")
-       
+        
         col_csv, col_zip, col_word = st.columns(3)
-       
+        
         file_name_csv = f"Export_{project_name}_{date_str}.csv"
         with col_csv:
             st.download_button(
@@ -371,7 +403,7 @@ elif st.session_state['step'] == 'FINISHED':
                     mime='application/zip',
                     use_container_width=True
                 )
-       
+        
         # Génération du rapport Word
         with st.spinner("Génération du rapport Word..."):
             try:
@@ -381,7 +413,7 @@ elif st.session_state['step'] == 'FINISHED':
                     st.session_state['project_data'],
                     st.session_state['form_start_time']
                 )
-               
+                
                 file_name_word = f"Rapport_{project_name}_{date_str}.docx"
                 with col_word:
                     st.download_button(
@@ -393,12 +425,12 @@ elif st.session_state['step'] == 'FINISHED':
                     )
             except Exception as e:
                 st.error(f"Erreur lors de la génération du rapport Word : {e}")
-   
+    
         # --- 3. OUVERTURE DE L'APPLICATION NATIVE (MAILTO) ---
         st.markdown("---")
         st.markdown("### 📧 Partager par Email")
         st.info("💡 Téléchargez d'abord les fichiers ci-dessus, puis cliquez sur le bouton ci-dessous pour ouvrir votre application email.")
-       
+        
         subject = f"Rapport Audit : {project_name}"
         body = (
             f"Bonjour,\n\n"
@@ -409,13 +441,13 @@ elif st.session_state['step'] == 'FINISHED':
             f"- {file_name_word}\n\n"
             f"Cordialement."
         )
-       
+        
         mailto_link = (
             f"mailto:?" 
             f"subject={urllib.parse.quote(subject)}" 
             f"&body={urllib.parse.quote(body)}"
         )
-       
+        
         st.markdown(
             f'<a href="{mailto_link}" target="_blank" style="text-decoration: none;">'
             f'<button style="background-color: #E9630C; color: white; border: none; padding: 10px 20px; border-radius: 8px; width: 100%; font-size: 16px; cursor: pointer;">'
