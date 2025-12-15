@@ -323,6 +323,7 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                     if df_struct is None:
                         st.error("Structure du formulaire manquante. Veuillez recharger le projet.")
                         st.experimental_rerun()
+                        st.stop() # <-- Utiliser st.stop() pour arrêter l'exécution du script principal
                     # -------------------------------------------------------------
                     
                     # --- NOUVEAU BLOC TRY/EXCEPT POUR ISOLER L'ATTRIBUTERROR ---
@@ -338,11 +339,9 @@ elif st.session_state['step'] in ['LOOP_DECISION', 'FILL_PHASE']:
                         # Si l'erreur se produit DANS la fonction de validation
                         st.session_state['last_validation_errors'] = f"Erreur critique dans la validation (AttributeError) : {e}"
                         st.error(f"Erreur interne : {e}. Veuillez contacter le support. (Code: ATTRIB-VALID)")
-                        st.session_state['show_comment_on_error'] = True # Afficher le champ commentaire au cas où
+                        st.session_state['show_comment_on_error'] = True 
                         st.experimental_rerun()
-                        return # Arrête l'exécution pour ne pas continuer dans le bloc 'if is_valid'/'else'
-                    # -----------------------------------------------------------------
-
+                        st.stop()
                     if is_valid:
                         new_entry = {"phase_name": current_phase, "answers": st.session_state['current_phase_temp'].copy()}
                         st.session_state['collected_data'].append(new_entry)
