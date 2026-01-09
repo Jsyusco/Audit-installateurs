@@ -12,8 +12,8 @@ import streamlit.components.v1 as components
 def enable_pwa():
     # Remplacez par les liens directs vers vos fichiers sur GitHub 
     # (utilisez le bouton "Raw" sur GitHub pour avoir le bon lien)
-    manifest_url = "https://raw.githubusercontent.com/VOTRE_PROFIL/VOTRE_REPO/main/manifest.json"
-    sw_url = "https://raw.githubusercontent.com/VOTRE_PROFIL/VOTRE_REPO/main/sw.js"
+    manifest_url = "https://github.com/Jsyusco/Audit-installateurs/blob/main/manifest.json"
+    sw_url = "https://github.com/Jsyusco/Audit-installateurs/blob/main/sw.js"
     
     pwa_js = f"""
         <script>
