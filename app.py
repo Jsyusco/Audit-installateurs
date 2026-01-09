@@ -9,15 +9,6 @@ from datetime import datetime
 import utils
 import streamlit.components.v1 as components
 
-from streamlit_option_menu import option_menu
-
-# Une barre de navigation horizontale en haut ou en bas
-selected = option_menu(
-    menu_title=None, 
-    options=["Accueil", "Données", "Réglages"], 
-    icons=["house", "database", "gear"], 
-    orientation="horizontal",
-)
 
 
 def enable_pwa():
