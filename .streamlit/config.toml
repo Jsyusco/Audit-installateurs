@@ -2,5 +2,8 @@
 toolbarMode = "minimal" # Cache la plupart des menus Streamlit
 
 [theme]
-base = "light"
-primaryColor = "#007AFF" # Bleu iOS par exemple
+base = "dark"
+primaryColor = "#ff4b4b" # Vous pouvez changer cette couleur (couleur d'accent)
+backgroundColor = "#0e1117"
+secondaryBackgroundColor = "#262730"
+textColor = "#fafafa"
