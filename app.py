@@ -37,19 +37,66 @@ enable_pwa()
 
 
 
-# CSS pour le thème sombre et les couleurs spécifiques
+# --- CONFIGURATION ET STYLE ---
+st.set_page_config(page_title="Formulaire Dynamique - Firestore", layout="centered")
+
+# CSS ADAPTÉ POUR LE DARKMODE ET LIGHTMODE (Utilisation des variables CSS Streamlit)
 st.markdown("""
 <style>
-    .stApp { background-color: #121212; color: #e0e0e0; }
-    .main-header { background-color: #1e1e1e; padding: 20px; border-radius: 10px; margin-bottom: 20px; text-align: center; border-bottom: 3px solid #E9630C; }
+    /* Utilisation de var(--secondary-background-color) et var(--text-color) pour s'adapter au thème choisi par l'utilisateur */
+    
+    .main-header { 
+        background-color: var(--secondary-background-color); 
+        padding: 20px; 
+        border-radius: 10px; 
+        margin-bottom: 20px; 
+        text-align: center; 
+        border-bottom: 3px solid #E9630C; 
+        color: var(--text-color);
+    }
+    
     .block-container { max-width: 800px; }
-    .phase-block { background-color: #1e1e1e; padding: 25px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #333; }
-    .question-card { background-color: transparent; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 3px solid #E9630C; }
-    h1, h2, h3 { color: #ffffff !important; }
+    
+    .phase-block { 
+        background-color: var(--secondary-background-color); 
+        padding: 25px; 
+        border-radius: 12px; 
+        margin-bottom: 20px; 
+        border: 1px solid rgba(128, 128, 128, 0.2); 
+    }
+    
+    .question-card { 
+        background-color: transparent; 
+        padding: 15px; 
+        border-radius: 8px; 
+        margin-bottom: 15px; 
+        border-left: 3px solid #E9630C; 
+    }
+    
+    h1, h2, h3 { color: var(--text-color) !important; }
+    
     .description { font-size: 0.9em; color: #EB6408; margin-bottom: 10px; }
     .mandatory { color: #F4B400; font-weight: bold; margin-left: 5px; }
-    .success-box { background-color: #1e4620; padding: 15px; border-radius: 8px; border-left: 5px solid #4caf50; color: #fff; margin: 10px 0; }
-    .error-box { background-color: #3d1f1f; padding: 15px; border-radius: 8px; border-left: 5px solid #ff6b6b; color: #ffdad9; margin: 10px 0; }
+    
+    /* Utilisation de rgba pour que le fond soit coloré mais transparent (compatible Light/Dark) */
+    .success-box { 
+        background-color: rgba(76, 175, 80, 0.1); 
+        padding: 15px; 
+        border-radius: 8px; 
+        border-left: 5px solid #4caf50; 
+        color: var(--text-color); 
+        margin: 10px 0; 
+    }
+    
+    .error-box { 
+        background-color: rgba(255, 107, 107, 0.1); 
+        padding: 15px; 
+        border-radius: 8px; 
+        border-left: 5px solid #ff6b6b; 
+        color: var(--text-color); 
+        margin: 10px 0; 
+    }
+    
     .stButton > button { border-radius: 8px; font-weight: bold; padding: 0.5rem 1rem; }
     div[data-testid="stButton"] > button { width: 100%; }
 </style>
