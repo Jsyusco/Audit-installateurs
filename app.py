@@ -66,6 +66,47 @@ st.set_page_config(
 inject_pwa_full()
 
 
+def main():
+    # 1. Configuration du widget à partir des secrets TOML
+    firebase_config = {
+        "apiKey": st.secrets["firebase_api_key_web"],
+        "authDomain": st.secrets["firebase_auth_domain"],
+        "projectId": st.secrets["firebase_project_id"],
+        "storageBucket": st.secrets["firebase_storage_bucket"],
+        "messagingSenderId": st.secrets["firebase_messaging_sender_id"],
+        "appId": st.secrets["firebase_app_id"]
+    }
+
+    # 2. Affichage du formulaire de connexion
+    # On utilise "password" pour l'email/mdp et "google.com" pour le SSO
+    user_data = firebase_auth(firebase_config, providers=["password", "google.com"])
+
+    if not user_data:
+        st.info("Veuillez vous connecter pour accéder à l'application d'audit.")
+        st.stop()
+
+    # 3. Une fois connecté, on initialise l'application
+    init_session_state()
+    
+    # Affichage de l'utilisateur en barre latérale
+    with st.sidebar:
+        st.write(f"👤 **{user_data['email']}**")
+        if st.button("Se déconnecter"):
+            st.session_state.clear()
+            st.rerun()
+
+    st.markdown('<div class="main-header"><h1>📝 Formulaire Chantier </h1></div>', unsafe_allow_html=True)
+
+    # --- RESTE DU CODE (LOGIQUE DE CHARGEMENT ET PHASES) ---
+    # Note : Passez user_data['email'] à la fonction de sauvegarde à la fin
+    # ...
+    
+    # Dans la section FINISHED, modifiez l'appel à save_form_data :
+    # success, res = utils.save_form_data(..., user_email=user_data['email'])
+
+if __name__ == "__main__":
+    main()
+
 # CSS ADAPTÉ POUR LE DARKMODE ET LIGHTMODE (Utilisation des variables CSS Streamlit)
 st.markdown("""
 <style>
