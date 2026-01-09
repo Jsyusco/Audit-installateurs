@@ -9,36 +9,59 @@ from datetime import datetime
 import utils
 import streamlit.components.v1 as components
 
-def enable_pwa():
-    # Remplacez par les liens directs vers vos fichiers sur GitHub 
-    # (utilisez le bouton "Raw" sur GitHub pour avoir le bon lien)
-    manifest_url = "https://github.com/Jsyusco/Audit-installateurs/blob/main/manifest.json"
-    sw_url = "https://github.com/Jsyusco/Audit-installateurs/blob/main/sw.js"
-    
-    pwa_js = f"""
-        <script>
-        // Ajout du manifest
-        var link = document.createElement('link');
+def inject_pwa_icons():
+    # Conversion des liens GitHub en liens RAW (directs)
+    icon_512 = "https://raw.githubusercontent.com/Jsyusco/Audit-installateurs/main/logo.png"
+    icon_192 = "https://raw.githubusercontent.com/Jsyusco/Audit-installateurs/main/logo192.png"
+    manifest_url = "https://raw.githubusercontent.com/Jsyusco/Audit-installateurs/main/manifest.json"
+
+    pwa_html = f"""
+    <script>
+        const head = window.parent.document.head;
+
+        // 1. Ajout du Manifest
+        const link = window.parent.document.createElement('link');
         link.rel = 'manifest';
         link.href = '{manifest_url}';
-        document.head.appendChild(link);
+        head.appendChild(link);
 
-        // Enregistrement du Service Worker
-        if ('serviceWorker' in navigator) {{
-            navigator.serviceWorker.register('{sw_url}');
-        }}
-        </script>
+        // 2. Icônes pour iOS (Apple)
+        const appleIcon = window.parent.document.createElement('link');
+        appleIcon.rel = 'apple-touch-icon';
+        appleIcon.href = '{icon_512}';
+        head.appendChild(appleIcon);
+
+        // 3. Favicon standard
+        const favicon = window.parent.document.createElement('link');
+        favicon.rel = 'icon';
+        favicon.type = 'image/png';
+        favicon.href = '{icon_192}';
+        head.appendChild(favicon);
+        
+        // 4. Mode plein écran pour mobile
+        const metaCapable = window.parent.document.createElement('meta');
+        metaCapable.name = 'apple-mobile-web-app-capable';
+        metaCapable.content = 'yes';
+        head.appendChild(metaCapable);
+
+        const metaStatus = window.parent.document.createElement('meta');
+        metaStatus.name = 'apple-mobile-web-app-status-bar-style';
+        metaStatus.content = 'black-translucent';
+        head.appendChild(metaStatus);
+    </script>
     """
-    components.html(pwa_js, height=0)
+    components.html(pwa_html, height=0)
 
-st.set_page_config(page_title="Mon App Pro", page_icon="📱")
-enable_pwa()
+# --- CONFIGURATION STREAMLIT ---
+st.set_page_config(
+    page_title="Audit Installateurs",
+    page_icon="https://raw.githubusercontent.com/Jsyusco/Audit-installateurs/main/logo192.png",
+    layout="centered"
+)
 
+# Appeler la fonction PWA immédiatement
+inject_pwa_icons()
 
-
-
-# --- CONFIGURATION ET STYLE ---
-st.set_page_config(page_title="Formulaire Dynamique - Firestore", layout="centered")
 
 # CSS ADAPTÉ POUR LE DARKMODE ET LIGHTMODE (Utilisation des variables CSS Streamlit)
 st.markdown("""
