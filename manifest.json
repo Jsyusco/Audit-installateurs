@@ -1,16 +1,15 @@
 {
-  "short_name": "YUSCO",
-  "name": "Formulaire chantier",
-  "description": "Interface mobile connectée à Firestore",
+  "short_name": "Audit",
+  "name": "Audit Installateurs",
   "icons": [
     {
-      "src": "https://github.com/Jsyusco/Audit-installateurs/blob/main/logo192.png",
+      "src": "https://raw.githubusercontent.com/Jsyusco/Audit-installateurs/main/logo192.png",
       "type": "image/png",
       "sizes": "192x192",
       "purpose": "any maskable"
     },
     {
-      "src": "https://github.com/Jsyusco/Audit-installateurs/blob/main/logo.png",
+      "src": "https://raw.githubusercontent.com/Jsyusco/Audit-installateurs/main/logo.png",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "any maskable"
