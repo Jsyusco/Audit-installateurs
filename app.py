@@ -36,10 +36,6 @@ def enable_pwa():
 st.set_page_config(page_title="Mon App Pro", page_icon="📱")
 enable_pwa()
 
-st.title("Mon App Firestore")
-# Le reste de votre code...
-# --- CONFIGURATION ET STYLE ---
-st.set_page_config(page_title="Formulaire Dynamique - Firestore", layout="centered")
 
 # CSS pour le thème sombre et les couleurs spécifiques
 st.markdown("""
