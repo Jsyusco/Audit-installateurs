@@ -9,3 +9,5 @@ firebase-admin
 # --- Génération de fichiers ---
 # Attention : le package s'appelle 'python-docx' et non 'docx'
 python-docx
+
+streamlit-option-menu
