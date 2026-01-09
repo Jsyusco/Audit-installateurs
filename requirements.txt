@@ -1,7 +1,14 @@
+# --- Bibliothèques Core ---
 streamlit
 pandas
 numpy
+
+# --- Base de données ---
 firebase-admin
+
+# --- Génération de fichiers ---
 python-docx
 streamlit-option-menu
+
+# --- AUTHENTIFICATION (AJOUTER CETTE LIGNE ICI) ---
 streamlit-firebase-auth
