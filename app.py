@@ -4,9 +4,6 @@ import uuid
 import urllib.parse
 from datetime import datetime
 from streamlit_firebase_auth import firebase_auth
-
-# Import des fonctions et constantes depuis utils.py
-# (Assurez-vous que utils.py est dans le même répertoire)
 import utils
 import streamlit.components.v1 as components
 
@@ -169,6 +166,28 @@ st.markdown("""
     div[data-testid="stButton"] > button { width: 100%; }
 </style>
 """, unsafe_allow_html=True)
+
+# ==========================================================
+# 🟢 MODIFICATION 2 : BLOC DE CONNEXION (BARRIÈRE)
+# ==========================================================
+# Chargement des clés depuis vos secrets TOML
+firebase_config = {
+    "apiKey": st.secrets["firebase_api_key_web"],
+    "authDomain": st.secrets["firebase_auth_domain"],
+    "projectId": st.secrets["firebase_project_id"],
+    "storageBucket": st.secrets["firebase_storage_bucket"],
+    "messagingSenderId": st.secrets["firebase_messaging_sender_id"],
+    "appId": st.secrets["firebase_app_id"]
+}
+
+# Affiche le widget de connexion
+user_data = firebase_auth(firebase_config, providers=["password", "google.com"])
+
+# Si l'utilisateur n'est pas connecté, on arrête l'exécution ici
+if not user_data:
+    st.info("Veuillez vous connecter pour accéder à l'application d'audit.")
+    st.stop()
+# ==========================================================
 
 # --- GESTION DE L'ÉTAT ---
 def init_session_state():
