@@ -9,36 +9,38 @@ from datetime import datetime
 import utils
 import streamlit.components.v1 as components
 
-def inject_pwa_icons():
-    # Conversion des liens GitHub en liens RAW (directs)
-    icon_512 = "https://raw.githubusercontent.com/Jsyusco/Audit-installateurs/main/logo.png"
-    icon_192 = "https://raw.githubusercontent.com/Jsyusco/Audit-installateurs/main/logo192.png"
+def inject_pwa_full():
+    # Liens RAW directs vers vos fichiers GitHub
+    icon_url = "https://raw.githubusercontent.com/Jsyusco/Audit-installateurs/main/logo.png?v=2"
     manifest_url = "https://raw.githubusercontent.com/Jsyusco/Audit-installateurs/main/manifest.json"
 
     pwa_html = f"""
     <script>
         const head = window.parent.document.head;
 
-        // 1. Ajout du Manifest
-        const link = window.parent.document.createElement('link');
-        link.rel = 'manifest';
-        link.href = '{manifest_url}';
-        head.appendChild(link);
+        // 1. Force l'icône pour iOS (Safari)
+        // On vérifie si elle existe déjà pour ne pas la dupliquer
+        if (!head.querySelector('link[rel="apple-touch-icon"]')) {{
+            const appleIcon = window.parent.document.createElement('link');
+            appleIcon.rel = 'apple-touch-icon';
+            appleIcon.href = '{icon_url}';
+            head.appendChild(appleIcon);
+        }}
 
-        // 2. Icônes pour iOS (Apple)
-        const appleIcon = window.parent.document.createElement('link');
-        appleIcon.rel = 'apple-touch-icon';
-        appleIcon.href = '{icon_512}';
-        head.appendChild(appleIcon);
+        // 2. Force le lien vers le Manifest (Android/Chrome)
+        if (!head.querySelector('link[rel="manifest"]')) {{
+            const manifest = window.parent.document.createElement('link');
+            manifest.rel = 'manifest';
+            manifest.href = '{manifest_url}';
+            head.appendChild(manifest);
+        }}
 
-        // 3. Favicon standard
-        const favicon = window.parent.document.createElement('link');
-        favicon.rel = 'icon';
-        favicon.type = 'image/png';
-        favicon.href = '{icon_192}';
-        head.appendChild(favicon);
-        
-        // 4. Mode plein écran pour mobile
+        // 3. Paramètres spécifiques iOS pour le mode "Application"
+        const metaTitle = window.parent.document.createElement('meta');
+        metaTitle.name = 'apple-mobile-web-app-title';
+        metaTitle.content = 'Audit'; // Nom sous l'icône
+        head.appendChild(metaTitle);
+
         const metaCapable = window.parent.document.createElement('meta');
         metaCapable.name = 'apple-mobile-web-app-capable';
         metaCapable.content = 'yes';
@@ -50,17 +52,18 @@ def inject_pwa_icons():
         head.appendChild(metaStatus);
     </script>
     """
+    # Injection via un composant invisible
     components.html(pwa_html, height=0)
 
-# --- CONFIGURATION STREAMLIT ---
+# --- CONFIGURATION DE LA PAGE ---
 st.set_page_config(
     page_title="Audit Installateurs",
-    page_icon="https://raw.githubusercontent.com/Jsyusco/Audit-installateurs/main/logo192.png",
+    page_icon= "https://raw.githubusercontent.com/Jsyusco/Audit-installateurs/main/logo.png",
     layout="centered"
 )
 
-# Appeler la fonction PWA immédiatement
-inject_pwa_icons()
+# Appel de la fonction PWA
+inject_pwa_full()
 
 
 # CSS ADAPTÉ POUR LE DARKMODE ET LIGHTMODE (Utilisation des variables CSS Streamlit)
