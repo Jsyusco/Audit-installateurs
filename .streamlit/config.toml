@@ -1,0 +1,6 @@
+[client]
+toolbarMode = "minimal" # Cache la plupart des menus Streamlit
+
+[theme]
+base = "light"
+primaryColor = "#007AFF" # Bleu iOS par exemple
