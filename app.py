@@ -3,9 +3,10 @@ import pandas as pd
 import uuid
 import urllib.parse
 from datetime import datetime
-from streamlit_firebase_auth import firebase_auth
 import utils
 import streamlit.components.v1 as components
+
+from streamlit_firebase_auth import firebase_auth
 
 def inject_pwa_full():
     # Liens RAW directs vers vos fichiers GitHub
