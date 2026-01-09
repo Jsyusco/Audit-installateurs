@@ -11,30 +11,7 @@ import streamlit.components.v1 as components
 
 
 
-def enable_pwa():
-    # Remplacez par les liens directs vers vos fichiers sur GitHub 
-    # (utilisez le bouton "Raw" sur GitHub pour avoir le bon lien)
-    manifest_url = "https://github.com/Jsyusco/Audit-installateurs/blob/main/manifest.json"
-    sw_url = "https://github.com/Jsyusco/Audit-installateurs/blob/main/sw.js"
-    
-    pwa_js = f"""
-        <script>
-        // Ajout du manifest
-        var link = document.createElement('link');
-        link.rel = 'manifest';
-        link.href = '{manifest_url}';
-        document.head.appendChild(link);
 
-        // Enregistrement du Service Worker
-        if ('serviceWorker' in navigator) {{
-            navigator.serviceWorker.register('{sw_url}');
-        }}
-        </script>
-    """
-    components.html(pwa_js, height=0)
-
-st.set_page_config(page_title="Mon App Pro", page_icon="📱")
-enable_pwa()
 
 
 # CSS pour le thème sombre et les couleurs spécifiques
