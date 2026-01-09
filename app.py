@@ -7,7 +7,35 @@ from datetime import datetime
 # Import des fonctions et constantes depuis utils.py
 # (Assurez-vous que utils.py est dans le même répertoire)
 import utils
+import streamlit.components.v1 as components
 
+def enable_pwa():
+    # Remplacez par les liens directs vers vos fichiers sur GitHub 
+    # (utilisez le bouton "Raw" sur GitHub pour avoir le bon lien)
+    manifest_url = "https://raw.githubusercontent.com/VOTRE_PROFIL/VOTRE_REPO/main/manifest.json"
+    sw_url = "https://raw.githubusercontent.com/VOTRE_PROFIL/VOTRE_REPO/main/sw.js"
+    
+    pwa_js = f"""
+        <script>
+        // Ajout du manifest
+        var link = document.createElement('link');
+        link.rel = 'manifest';
+        link.href = '{manifest_url}';
+        document.head.appendChild(link);
+
+        // Enregistrement du Service Worker
+        if ('serviceWorker' in navigator) {{
+            navigator.serviceWorker.register('{sw_url}');
+        }}
+        </script>
+    """
+    components.html(pwa_js, height=0)
+
+st.set_page_config(page_title="Mon App Pro", page_icon="📱")
+enable_pwa()
+
+st.title("Mon App Firestore")
+# Le reste de votre code...
 # --- CONFIGURATION ET STYLE ---
 st.set_page_config(page_title="Formulaire Dynamique - Firestore", layout="centered")
 
