@@ -3,6 +3,7 @@ import pandas as pd
 import uuid
 import urllib.parse
 from datetime import datetime
+from streamlit_firebase_auth import firebase_auth
 
 # Import des fonctions et constantes depuis utils.py
 # (Assurez-vous que utils.py est dans le même répertoire)
