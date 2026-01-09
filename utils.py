@@ -376,6 +376,7 @@ def save_form_data(collected_data, project_data, submission_id, start_time):
             cleaned_data.append(clean_phase)
         
         final_document = {
+            "auditeur_email": user_email, # <--- Ajout de l'email
             "project_intitule": project_data.get('Intitulé', 'N/A'),
             "project_details": project_data,
             "submission_id": submission_id,
