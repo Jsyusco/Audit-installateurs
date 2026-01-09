@@ -11,3 +11,5 @@ firebase-admin
 python-docx
 
 streamlit-option-menu
+
+streamlit-firebase-auth
