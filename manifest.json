@@ -4,13 +4,13 @@
   "description": "Interface mobile connectée à Firestore",
   "icons": [
     {
-      "src": "https://github.com/Jsyusco/Audit-installateurs/blob/main/logo",
+      "src": "https://github.com/Jsyusco/Audit-installateurs/blob/main/logo.png",
       "type": "image/png",
       "sizes": "192x192",
       "purpose": "any maskable"
     },
     {
-      "src": "https://cdn-icons-png.flaticon.com/512/888/888857.png",
+      "src": "https://github.com/Jsyusco/Audit-installateurs/blob/main/logo.png",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "any maskable"
